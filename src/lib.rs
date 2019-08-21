@@ -3,7 +3,6 @@ extern crate chrono;
 extern crate am2320;
 
 use std::{thread, time};
-use std::cell::Cell;
 use embedded_hal::blocking::{delay, i2c};
 
 use am2320::AM2320;
@@ -93,7 +92,7 @@ pub trait Sensor {
 }
 
 pub struct AM2320Sensor<I2C, Delay> {
-   am2320: AM2320<I2C, Delay>, 
+   am2320: AM2320<I2C, Delay>,
 }
 
 impl<I2C, Delay, E> AM2320Sensor<I2C, Delay>
@@ -106,7 +105,7 @@ where
     }
 }
 
-impl<I2C, Delay, E> Sensor for AM2320Sensor<I2C, Delay> 
+impl<I2C, Delay, E> Sensor for AM2320Sensor<I2C, Delay>
 where
     I2C: i2c::Read<Error=E> + i2c::Write<Error=E>,
     Delay: delay::DelayUs<u16>,
@@ -116,7 +115,6 @@ where
             Ok(measurement) => Ok(vec![measurement.temperature as f32, measurement.humidity as f32]),
             Err(err) => Err(format!("failed to read: {:?}", err)),
         }
-        
     }
 }
 
@@ -129,8 +127,14 @@ pub struct BlinktLEDs {
 }
 
 impl BlinktLEDs {
-    pub fn new() -> BlinktLEDs {
-        BlinktLEDs { blinkt: Blinkt::new().unwrap() }
+    pub fn new() -> Self {
+        Self { blinkt: Blinkt::new().unwrap() }
+    }
+}
+
+impl Default for BlinktLEDs {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -148,18 +152,15 @@ impl LEDs for &mut BlinktLEDs {
     }
 }
 
-fn data_is_roughly_equal(previous_data: &Vec<f32>, new_data: &Vec<f32>) -> bool {
-    previous_data.iter().zip(new_data.iter()).try_fold(true, |acc, (&previous, &new)| {
-        if (previous - new).abs() < 0.001 {
-            Some(true)
-        } else {
-            None
-        }
-    }).is_some()
+fn data_is_roughly_equal(previous_data: &[f32], new_data: &[f32]) -> bool {
+    previous_data.iter().zip(new_data.iter()).all(|(&previous, &new)| {
+        // TODO: pull out constant
+        (previous - new).abs() < 0.001
+    })
 }
 
 
-fn sync_loop(loop_sleep: u64, mut sensor: impl Sensor, mut leds: impl LEDs, colour_range: ColourRange) -> Result<(), String> {
+pub fn sync_loop(loop_sleep: u64, mut sensor: impl Sensor, mut leds: impl LEDs, colour_range: ColourRange) -> Result<(), String> {
     let mut error_count = 0;
     let mut previous_data: Option<Vec<f32>> = None;
 
@@ -177,7 +178,6 @@ fn sync_loop(loop_sleep: u64, mut sensor: impl Sensor, mut leds: impl LEDs, colo
             Ok(new_data) => {
                 error_count = 0;
 
-                // TODO: introduce some variability
                 if let Some(previous_data) = &previous_data {
                     if data_is_roughly_equal(previous_data, &new_data) {
                         eprintln!("Skipping unchanged data");
@@ -186,7 +186,7 @@ fn sync_loop(loop_sleep: u64, mut sensor: impl Sensor, mut leds: impl LEDs, colo
                 }
 
                 previous_data = Some(new_data.clone());
-                
+
                 println!("{},data,{},{}", now.to_rfc3339(), new_data[0], new_data[1]);
 
                 let pixels = colour_range.get_pixels(new_data[0]);
@@ -240,7 +240,7 @@ mod tests {
     }
 
     impl LEDs for &mut MockLEDs {
-        fn show(&mut self, colours: Vec<Colour>, brightness: f32) -> Result<(), String> {
+        fn show(&mut self, colours: Vec<Colour>, _brightness: f32) -> Result<(), String> {
             self.pixels.push(colours);
             Ok(())
         }
