@@ -1,13 +1,13 @@
+extern crate am2320;
 extern crate blinkt;
 extern crate chrono;
-extern crate am2320;
 
-use std::{thread, time};
 use embedded_hal::blocking::{delay, i2c};
+use std::{thread, time};
 
 use am2320::AM2320;
 use blinkt::Blinkt;
-use chrono::{DateTime, offset::Utc};
+use chrono::{offset::Utc, DateTime};
 
 static NUM_PIXELS: u8 = 8;
 static ERROR_LIMIT: u8 = 3;
@@ -75,9 +75,11 @@ impl ColourRange {
             if bottom.value <= value && value <= top.value {
                 let bottom_to_value = value - bottom.value;
                 let bottom_to_top = top.value - bottom.value;
-                let num_pixels = (f32::from(self.num_pixels) * (bottom_to_value / bottom_to_top)).round() as u8;
+                let num_pixels =
+                    (f32::from(self.num_pixels) * (bottom_to_value / bottom_to_top)).round() as u8;
 
-                let mut pixels = vec![bottom.colour.clone(); (self.num_pixels - num_pixels) as usize];
+                let mut pixels =
+                    vec![bottom.colour.clone(); (self.num_pixels - num_pixels) as usize];
                 let top_pixels = vec![top.colour.clone(); num_pixels as usize];
                 pixels.extend(top_pixels);
                 return pixels;
@@ -92,27 +94,32 @@ pub trait Sensor {
 }
 
 pub struct AM2320Sensor<I2C, Delay> {
-   am2320: AM2320<I2C, Delay>,
+    am2320: AM2320<I2C, Delay>,
 }
 
 impl<I2C, Delay, E> AM2320Sensor<I2C, Delay>
 where
-    I2C: i2c::Read<Error=E> + i2c::Write<Error=E>,
+    I2C: i2c::Read<Error = E> + i2c::Write<Error = E>,
     Delay: delay::DelayUs<u16>,
 {
     pub fn new(device: I2C, delay: Delay) -> Self {
-        Self { am2320: AM2320::new(device, delay) }
+        Self {
+            am2320: AM2320::new(device, delay),
+        }
     }
 }
 
 impl<I2C, Delay, E> Sensor for AM2320Sensor<I2C, Delay>
 where
-    I2C: i2c::Read<Error=E> + i2c::Write<Error=E>,
+    I2C: i2c::Read<Error = E> + i2c::Write<Error = E>,
     Delay: delay::DelayUs<u16>,
 {
     fn read(&mut self) -> Result<Vec<f32>, String> {
         match self.am2320.read() {
-            Ok(measurement) => Ok(vec![measurement.temperature as f32, measurement.humidity as f32]),
+            Ok(measurement) => Ok(vec![
+                measurement.temperature as f32,
+                measurement.humidity as f32,
+            ]),
             Err(err) => Err(format!("failed to read: {:?}", err)),
         }
     }
@@ -128,7 +135,9 @@ pub struct BlinktLEDs {
 
 impl BlinktLEDs {
     pub fn new() -> Self {
-        Self { blinkt: Blinkt::new().unwrap() }
+        Self {
+            blinkt: Blinkt::new().unwrap(),
+        }
     }
 }
 
@@ -141,7 +150,8 @@ impl Default for BlinktLEDs {
 impl LEDs for &mut BlinktLEDs {
     fn show(&mut self, colours: Vec<Colour>, brightness: f32) -> Result<(), String> {
         for (pixel, colour) in colours.iter().enumerate() {
-            self.blinkt.set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
+            self.blinkt
+                .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
         }
 
         if let Err(err) = self.blinkt.show() {
@@ -153,14 +163,21 @@ impl LEDs for &mut BlinktLEDs {
 }
 
 fn data_is_roughly_equal(previous_data: &[f32], new_data: &[f32]) -> bool {
-    previous_data.iter().zip(new_data.iter()).all(|(&previous, &new)| {
-        // TODO: pull out constant
-        (previous - new).abs() < 0.001
-    })
+    previous_data
+        .iter()
+        .zip(new_data.iter())
+        .all(|(&previous, &new)| {
+            // TODO: pull out constant
+            (previous - new).abs() < 0.001
+        })
 }
 
-
-pub fn sync_loop(loop_sleep: u64, mut sensor: impl Sensor, mut leds: impl LEDs, colour_range: ColourRange) -> Result<(), String> {
+pub fn sync_loop(
+    loop_sleep: u64,
+    mut sensor: impl Sensor,
+    mut leds: impl LEDs,
+    colour_range: ColourRange,
+) -> Result<(), String> {
     let mut error_count = 0;
     let mut previous_data: Option<Vec<f32>> = None;
 
@@ -174,7 +191,7 @@ pub fn sync_loop(loop_sleep: u64, mut sensor: impl Sensor, mut leds: impl LEDs, 
                 if error_count > ERROR_LIMIT {
                     return Err("Too many errors".to_string());
                 }
-            },
+            }
             Ok(new_data) => {
                 error_count = 0;
 
@@ -192,14 +209,12 @@ pub fn sync_loop(loop_sleep: u64, mut sensor: impl Sensor, mut leds: impl LEDs, 
                 let pixels = colour_range.get_pixels(new_data[0]);
 
                 leds.show(pixels, LED_BRIGHTNESS)?;
-            },
+            }
         }
 
         thread::sleep(time::Duration::from_secs(loop_sleep));
     }
-
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -246,7 +261,6 @@ mod tests {
         }
     }
 
-
     #[test]
     fn cannot_create_colour_range_with_no_buckets() {
         // arrange
@@ -257,25 +271,21 @@ mod tests {
     }
 
     fn get_colour_range() -> ColourRange {
-        ColourRange::new(
-            vec![
-                Bucket::new("blue", 14.0, Colour(10, 10, 226)),
-                Bucket::new("orange", 18.0, Colour(120, 20, 0)),
-                Bucket::new("salmon", 22.0, Colour(160, 10, 1)),
-                Bucket::new("coral", 26.0, Colour(255, 1, 1)),
-                Bucket::new("red", 30.0, Colour(255, 0, 100)),
-            ],
-        ).unwrap()
+        ColourRange::new(vec![
+            Bucket::new("blue", 14.0, Colour(10, 10, 226)),
+            Bucket::new("orange", 18.0, Colour(120, 20, 0)),
+            Bucket::new("salmon", 22.0, Colour(160, 10, 1)),
+            Bucket::new("coral", 26.0, Colour(255, 1, 1)),
+            Bucket::new("red", 30.0, Colour(255, 0, 100)),
+        ])
+        .unwrap()
     }
 
     #[test]
     fn get_pixels_returns_all_pixels_as_colour_when_only_one_bucket() {
         // arrange
-        let colour_range = ColourRange::new(
-            vec![
-                Bucket::new("blue", 14.0, Colour(10, 10, 226)),
-            ],
-        ).unwrap();
+        let colour_range =
+            ColourRange::new(vec![Bucket::new("blue", 14.0, Colour(10, 10, 226))]).unwrap();
 
         // assert
         assert!(colour_range.get_pixels(12.0) == vec![Colour(10, 10, 226); 8]);
@@ -307,7 +317,9 @@ mod tests {
         let colour_range = get_colour_range();
 
         // assert
-        assert_eq!(colour_range.get_pixels(16.0), vec![
+        assert_eq!(
+            colour_range.get_pixels(16.0),
+            vec![
                 Colour(10, 10, 226),
                 Colour(10, 10, 226),
                 Colour(10, 10, 226),
@@ -315,7 +327,9 @@ mod tests {
                 Colour(120, 20, 0),
                 Colour(120, 20, 0),
                 Colour(120, 20, 0),
-                Colour(120, 20, 0)]);
+                Colour(120, 20, 0)
+            ]
+        );
     }
 
     #[test]
@@ -330,8 +344,32 @@ mod tests {
 
         // assert
         assert!(result.is_err());
-        assert_eq!(leds.pixels[0], vec![Colour(160, 10, 1), Colour(160, 10, 1), Colour(160, 10, 1), Colour(160, 10, 1), Colour(160, 10, 1), Colour(255, 1, 1), Colour(255, 1, 1), Colour(255, 1, 1)]);
-        assert_eq!(leds.pixels[1], vec![Colour(255, 1, 1), Colour(255, 1, 1), Colour(255, 1, 1), Colour(255, 1, 1), Colour(255, 0, 100), Colour(255, 0, 100), Colour(255, 0, 100), Colour(255, 0, 100)]);
+        assert_eq!(
+            leds.pixels[0],
+            vec![
+                Colour(160, 10, 1),
+                Colour(160, 10, 1),
+                Colour(160, 10, 1),
+                Colour(160, 10, 1),
+                Colour(160, 10, 1),
+                Colour(255, 1, 1),
+                Colour(255, 1, 1),
+                Colour(255, 1, 1)
+            ]
+        );
+        assert_eq!(
+            leds.pixels[1],
+            vec![
+                Colour(255, 1, 1),
+                Colour(255, 1, 1),
+                Colour(255, 1, 1),
+                Colour(255, 1, 1),
+                Colour(255, 0, 100),
+                Colour(255, 0, 100),
+                Colour(255, 0, 100),
+                Colour(255, 0, 100)
+            ]
+        );
     }
 
     #[test]
