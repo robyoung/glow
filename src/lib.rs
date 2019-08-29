@@ -5,7 +5,7 @@ extern crate chrono;
 use embedded_hal::blocking::{delay, i2c};
 use std::{thread, time};
 
-use am2320::AM2320;
+use am2320::{Measurement, AM2320};
 use blinkt::Blinkt;
 use chrono::{offset::Utc, DateTime};
 
@@ -90,7 +90,7 @@ impl ColourRange {
 }
 
 pub trait Sensor {
-    fn read(&mut self) -> Result<Vec<f32>, String>;
+    fn read(&mut self) -> Result<Measurement, String>;
 }
 
 pub struct AM2320Sensor<I2C, Delay> {
@@ -114,12 +114,9 @@ where
     I2C: i2c::Read<Error = E> + i2c::Write<Error = E>,
     Delay: delay::DelayUs<u16>,
 {
-    fn read(&mut self) -> Result<Vec<f32>, String> {
+    fn read(&mut self) -> Result<Measurement, String> {
         match self.am2320.read() {
-            Ok(measurement) => Ok(vec![
-                measurement.temperature as f32,
-                measurement.humidity as f32,
-            ]),
+            Ok(measurement) => Ok(measurement),
             Err(err) => Err(format!("failed to read: {:?}", err)),
         }
     }
@@ -162,15 +159,12 @@ impl LEDs for &mut BlinktLEDs {
     }
 }
 
-fn data_is_roughly_equal(previous_data: &[f32], new_data: &[f32]) -> bool {
-    previous_data
-        .iter()
-        .zip(new_data.iter())
-        .all(|(&previous, &new)| {
-            // TODO: pull out constant
-            (previous - new).abs() < 0.001
-        })
+fn data_is_roughly_equal(previous_data: &Measurement, new_data: &Measurement) -> bool {
+    (previous_data.temperature - new_data.temperature).abs() < 0.001
+        && (previous_data.humidity - new_data.humidity).abs() < 0.001
 }
+
+
 
 pub fn sync_loop(
     loop_sleep: u64,
@@ -179,7 +173,7 @@ pub fn sync_loop(
     colour_range: ColourRange,
 ) -> Result<(), String> {
     let mut error_count = 0;
-    let mut previous_data: Option<Vec<f32>> = None;
+    let mut previous_data: Option<Measurement> = None;
 
     loop {
         let now: DateTime<Utc> = Utc::now();
@@ -202,11 +196,19 @@ pub fn sync_loop(
                     }
                 }
 
-                previous_data = Some(new_data.clone());
+                previous_data = Some(Measurement {
+                    temperature: new_data.temperature,
+                    humidity: new_data.humidity,
+                });
 
-                println!("{},data,{},{}", now.to_rfc3339(), new_data[0], new_data[1]);
+                println!(
+                    "{},data,{},{}",
+                    now.to_rfc3339(),
+                    new_data.temperature,
+                    new_data.humidity
+                );
 
-                let pixels = colour_range.get_pixels(new_data[0]);
+                let pixels = colour_range.get_pixels(new_data.temperature as f32);
 
                 leds.show(pixels, LED_BRIGHTNESS)?;
             }
@@ -231,10 +233,16 @@ mod tests {
     }
 
     impl Sensor for MockSensor {
-        fn read(&mut self) -> Result<Vec<f32>, String> {
+        fn read(&mut self) -> Result<Measurement, String> {
             let result = match self.iteration {
-                0 => Ok(vec![23.4, 64.2]),
-                1 => Ok(vec![28.2, 64.4]),
+                0 => Ok(Measurement {
+                    temperature: 23.4,
+                    humidity: 64.2,
+                }),
+                1 => Ok(Measurement {
+                    temperature: 28.2,
+                    humidity: 64.4,
+                }),
                 _ => Err("Cannot read sensor".to_string()),
             };
 
@@ -375,8 +383,11 @@ mod tests {
     #[test]
     fn data_is_roughly_equal_when_within_limits() {
         // arrange
-        let previous_data = vec![12.3001, 13.4001];
-        let new_data = vec![12.3002, 13.4001];
+        let previous_data = Measurement {
+            temperature: 12.3001,
+            humidity: 13.4001,
+        };
+        let new_data = Measurement { temperature: 12.3002, humidity: 13.4001 };
 
         // assert
         assert!(data_is_roughly_equal(&previous_data, &new_data));
@@ -385,8 +396,11 @@ mod tests {
     #[test]
     fn data_is_not_roughly_equal_when_outside_limits() {
         // arrange
-        let previous_data = vec![12.3001, 13.4001];
-        let new_data = vec![12.4012, 13.4001];
+        let previous_data = Measurement {
+            temperature: 12.3001,
+            humidity: 13.4001,
+        };
+        let new_data = Measurement { temperature: 12.4012, humidity: 13.4001 };
 
         // assert
         assert!(!data_is_roughly_equal(&previous_data, &new_data));
