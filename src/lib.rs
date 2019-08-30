@@ -2,8 +2,6 @@ extern crate am2320;
 extern crate blinkt;
 extern crate chrono;
 
-
-
 use std::sync::mpsc::{sync_channel, Receiver};
 use std::{thread, time};
 
@@ -119,8 +117,6 @@ pub enum Message {
     Environment(Measurement),
 }
 
-
-
 pub fn start_am2320(loop_sleep: u64) -> Receiver<Event> {
     let (sender, receiver) = sync_channel(1);
 
@@ -152,7 +148,7 @@ pub fn start_am2320(loop_sleep: u64) -> Receiver<Event> {
 
                         Some(Event::new(Message::Environment(measurement)))
                     }
-                },
+                }
                 None => None,
             };
 
@@ -180,7 +176,7 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
                     eprintln!("too many errors, failing");
                     return None;
                 }
-            },
+            }
         }
     }
 }
@@ -189,8 +185,6 @@ fn measurement_is_roughly_equal(previous_data: &Measurement, new_data: &Measurem
     (previous_data.temperature - new_data.temperature).abs() < 0.001
         && (previous_data.humidity - new_data.humidity).abs() < 0.001
 }
-
-
 
 fn clone_measurement(measurement: &Measurement) -> Measurement {
     Measurement {
@@ -236,16 +230,12 @@ impl LEDs for &mut BlinktLEDs {
     }
 }
 
-
-
 pub fn main_loop(
     events: Receiver<Event>,
     mut leds: impl LEDs,
     colour_range: ColourRange,
 ) -> Result<(), String> {
     for event in events.iter() {
-
-
         match event.message() {
             Message::Environment(measurement) => {
                 // print csv
@@ -263,8 +253,6 @@ pub fn main_loop(
                 leds.show(pixels, LED_BRIGHTNESS)?;
             }
         }
-
-
     }
     Ok(())
 }

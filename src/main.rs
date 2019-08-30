@@ -1,8 +1,8 @@
 extern crate glow;
 extern crate rppal;
 
-use glow::{main_loop, Bucket, Colour, ColourRange, BlinktLEDs};
-use glow::{start_am2320};
+use glow::start_am2320;
+use glow::{main_loop, BlinktLEDs, Bucket, Colour, ColourRange};
 
 fn main() -> Result<(), String> {
     let receiver = environment::start_am2320(30);
