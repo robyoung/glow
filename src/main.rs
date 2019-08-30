@@ -1,16 +1,11 @@
 extern crate glow;
 extern crate rppal;
 
-use rppal::{hal::Delay, i2c::I2c};
-
-use glow::{sync_loop, Bucket, Colour, ColourRange};
-use glow::{AM2320Sensor, BlinktLEDs};
+use glow::{main_loop, Bucket, Colour, ColourRange, BlinktLEDs};
+use glow::{start_am2320};
 
 fn main() -> Result<(), String> {
-    let device = I2c::new().expect("could not initialise I2C");
-    let delay = Delay::new();
-
-    let sensor = AM2320Sensor::new(device, delay);
+    let receiver = environment::start_am2320(30);
     let mut leds = BlinktLEDs::new();
 
     let colour_range = ColourRange::new(vec![
@@ -21,5 +16,5 @@ fn main() -> Result<(), String> {
         Bucket::new("red", 30.0, Colour(255, 0, 100)),
     ])?;
 
-    sync_loop(30, sensor, &mut leds, colour_range)
+    main_loop(receiver, &mut leds, colour_range)
 }

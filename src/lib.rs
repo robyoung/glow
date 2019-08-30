@@ -2,12 +2,16 @@ extern crate am2320;
 extern crate blinkt;
 extern crate chrono;
 
-use embedded_hal::blocking::{delay, i2c};
+
+
+use std::sync::mpsc::{sync_channel, Receiver};
 use std::{thread, time};
 
 use am2320::{Measurement, AM2320};
+
 use blinkt::Blinkt;
 use chrono::{offset::Utc, DateTime};
+use rppal::{hal::Delay, i2c::I2c};
 
 static NUM_PIXELS: u8 = 8;
 static ERROR_LIMIT: u8 = 3;
@@ -89,36 +93,109 @@ impl ColourRange {
     }
 }
 
-pub trait Sensor {
-    fn read(&mut self) -> Result<Measurement, String>;
+pub struct Event {
+    stamp: DateTime<Utc>,
+    message: Message,
 }
 
-pub struct AM2320Sensor<I2C, Delay> {
-    am2320: AM2320<I2C, Delay>,
+impl Event {
+    pub fn new(message: Message) -> Event {
+        Event {
+            stamp: Utc::now(),
+            message: message,
+        }
+    }
+
+    pub fn stamp(&self) -> DateTime<Utc> {
+        self.stamp
+    }
+
+    pub fn message(&self) -> &Message {
+        &self.message
+    }
 }
 
-impl<I2C, Delay, E> AM2320Sensor<I2C, Delay>
-where
-    I2C: i2c::Read<Error = E> + i2c::Write<Error = E>,
-    Delay: delay::DelayUs<u16>,
-{
-    pub fn new(device: I2C, delay: Delay) -> Self {
-        Self {
-            am2320: AM2320::new(device, delay),
+pub enum Message {
+    Environment(Measurement),
+}
+
+
+
+pub fn start_am2320(loop_sleep: u64) -> Receiver<Event> {
+    let (sender, receiver) = sync_channel(1);
+
+    thread::spawn(move || {
+        let device = I2c::new().expect("could not initialise I2C");
+        let delay = Delay::new();
+
+        let mut am2320 = AM2320::new(device, delay);
+        let mut previous_data: Option<Measurement> = None;
+
+        loop {
+            let event = match read_am2320(&mut am2320) {
+                Some(measurement) => {
+                    let unchanged = if let Some(previous_data) = &previous_data {
+                        if measurement_is_roughly_equal(previous_data, &measurement) {
+                            eprintln!("Skipping unchanged data");
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if unchanged {
+                        None
+                    } else {
+                        previous_data = Some(clone_measurement(&measurement));
+
+                        Some(Event::new(Message::Environment(measurement)))
+                    }
+                },
+                None => None,
+            };
+
+            if let Some(event) = event {
+                if let Err(err) = sender.send(event) {
+                    eprintln!("Failed to write sensor data to channel: {:?}", err);
+                }
+            }
+
+            thread::sleep(time::Duration::from_secs(loop_sleep));
+        }
+    });
+    receiver
+}
+
+fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
+    let mut error_count: u8 = 0;
+    loop {
+        match sensor.read() {
+            Ok(measurement) => return Some(measurement),
+            Err(err) => {
+                error_count += 1;
+                eprintln!("{:?}", err);
+                if error_count > ERROR_LIMIT {
+                    eprintln!("too many errors, failing");
+                    return None;
+                }
+            },
         }
     }
 }
 
-impl<I2C, Delay, E> Sensor for AM2320Sensor<I2C, Delay>
-where
-    I2C: i2c::Read<Error = E> + i2c::Write<Error = E>,
-    Delay: delay::DelayUs<u16>,
-{
-    fn read(&mut self) -> Result<Measurement, String> {
-        match self.am2320.read() {
-            Ok(measurement) => Ok(measurement),
-            Err(err) => Err(format!("failed to read: {:?}", err)),
-        }
+fn measurement_is_roughly_equal(previous_data: &Measurement, new_data: &Measurement) -> bool {
+    (previous_data.temperature - new_data.temperature).abs() < 0.001
+        && (previous_data.humidity - new_data.humidity).abs() < 0.001
+}
+
+
+
+fn clone_measurement(measurement: &Measurement) -> Measurement {
+    Measurement {
+        temperature: measurement.temperature,
+        humidity: measurement.humidity,
     }
 }
 
@@ -159,115 +236,42 @@ impl LEDs for &mut BlinktLEDs {
     }
 }
 
-fn data_is_roughly_equal(previous_data: &Measurement, new_data: &Measurement) -> bool {
-    (previous_data.temperature - new_data.temperature).abs() < 0.001
-        && (previous_data.humidity - new_data.humidity).abs() < 0.001
-}
 
 
-
-pub fn sync_loop(
-    loop_sleep: u64,
-    mut sensor: impl Sensor,
+pub fn main_loop(
+    events: Receiver<Event>,
     mut leds: impl LEDs,
     colour_range: ColourRange,
 ) -> Result<(), String> {
-    let mut error_count = 0;
-    let mut previous_data: Option<Measurement> = None;
+    for event in events.iter() {
 
-    loop {
-        let now: DateTime<Utc> = Utc::now();
 
-        match sensor.read() {
-            Err(err) => {
-                error_count += 1;
-                eprintln!("Error reading sensor {} times: {:?}", error_count, err);
-                if error_count > ERROR_LIMIT {
-                    return Err("Too many errors".to_string());
-                }
-            }
-            Ok(new_data) => {
-                error_count = 0;
-
-                if let Some(previous_data) = &previous_data {
-                    if data_is_roughly_equal(previous_data, &new_data) {
-                        eprintln!("Skipping unchanged data");
-                        continue;
-                    }
-                }
-
-                previous_data = Some(Measurement {
-                    temperature: new_data.temperature,
-                    humidity: new_data.humidity,
-                });
-
+        match event.message() {
+            Message::Environment(measurement) => {
+                // print csv
                 println!(
                     "{},data,{},{}",
-                    now.to_rfc3339(),
-                    new_data.temperature,
-                    new_data.humidity
+                    event.stamp.to_rfc3339(),
+                    measurement.temperature,
+                    measurement.humidity
                 );
 
-                let pixels = colour_range.get_pixels(new_data.temperature as f32);
+                // calculate pixels
+                let pixels = colour_range.get_pixels(measurement.temperature as f32);
 
+                // update Blinkt
                 leds.show(pixels, LED_BRIGHTNESS)?;
             }
         }
 
-        thread::sleep(time::Duration::from_secs(loop_sleep));
+
     }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct MockSensor {
-        iteration: u8,
-    }
-
-    impl MockSensor {
-        fn new() -> MockSensor {
-            MockSensor { iteration: 0 }
-        }
-    }
-
-    impl Sensor for MockSensor {
-        fn read(&mut self) -> Result<Measurement, String> {
-            let result = match self.iteration {
-                0 => Ok(Measurement {
-                    temperature: 23.4,
-                    humidity: 64.2,
-                }),
-                1 => Ok(Measurement {
-                    temperature: 28.2,
-                    humidity: 64.4,
-                }),
-                _ => Err("Cannot read sensor".to_string()),
-            };
-
-            self.iteration += 1;
-
-            result
-        }
-    }
-
-    struct MockLEDs {
-        pixels: Vec<Vec<Colour>>,
-    }
-
-    impl MockLEDs {
-        fn new() -> MockLEDs {
-            MockLEDs { pixels: vec![] }
-        }
-    }
-
-    impl LEDs for &mut MockLEDs {
-        fn show(&mut self, colours: Vec<Colour>, _brightness: f32) -> Result<(), String> {
-            self.pixels.push(colours);
-            Ok(())
-        }
-    }
 
     #[test]
     fn cannot_create_colour_range_with_no_buckets() {
@@ -341,56 +345,19 @@ mod tests {
     }
 
     #[test]
-    fn test_sync_loop() {
-        // arrange
-        let sensor = MockSensor::new();
-        let mut leds = MockLEDs::new();
-        let colour_range = get_colour_range();
-
-        // act
-        let result = sync_loop(0, sensor, &mut leds, colour_range);
-
-        // assert
-        assert!(result.is_err());
-        assert_eq!(
-            leds.pixels[0],
-            vec![
-                Colour(160, 10, 1),
-                Colour(160, 10, 1),
-                Colour(160, 10, 1),
-                Colour(160, 10, 1),
-                Colour(160, 10, 1),
-                Colour(255, 1, 1),
-                Colour(255, 1, 1),
-                Colour(255, 1, 1)
-            ]
-        );
-        assert_eq!(
-            leds.pixels[1],
-            vec![
-                Colour(255, 1, 1),
-                Colour(255, 1, 1),
-                Colour(255, 1, 1),
-                Colour(255, 1, 1),
-                Colour(255, 0, 100),
-                Colour(255, 0, 100),
-                Colour(255, 0, 100),
-                Colour(255, 0, 100)
-            ]
-        );
-    }
-
-    #[test]
     fn data_is_roughly_equal_when_within_limits() {
         // arrange
         let previous_data = Measurement {
             temperature: 12.3001,
             humidity: 13.4001,
         };
-        let new_data = Measurement { temperature: 12.3002, humidity: 13.4001 };
+        let new_data = Measurement {
+            temperature: 12.3002,
+            humidity: 13.4001,
+        };
 
         // assert
-        assert!(data_is_roughly_equal(&previous_data, &new_data));
+        assert!(measurement_is_roughly_equal(&previous_data, &new_data));
     }
 
     #[test]
@@ -400,10 +367,13 @@ mod tests {
             temperature: 12.3001,
             humidity: 13.4001,
         };
-        let new_data = Measurement { temperature: 12.4012, humidity: 13.4001 };
+        let new_data = Measurement {
+            temperature: 12.4012,
+            humidity: 13.4001,
+        };
 
         // assert
-        assert!(!data_is_roughly_equal(&previous_data, &new_data));
+        assert!(!measurement_is_roughly_equal(&previous_data, &new_data));
     }
 
 }
