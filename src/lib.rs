@@ -2,21 +2,54 @@ extern crate am2320;
 extern crate blinkt;
 extern crate chrono;
 
-use std::sync::mpsc::{sync_channel, Receiver};
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::{thread, time};
 
 use am2320::{Measurement, AM2320};
 
 use blinkt::Blinkt;
 use chrono::{offset::Utc, DateTime};
-use rppal::{hal::Delay, i2c::I2c};
+use rppal::{
+    gpio::{Gpio, Trigger},
+    hal::Delay,
+    i2c::I2c,
+};
 
 static NUM_PIXELS: u8 = 8;
 static ERROR_LIMIT: u8 = 3;
-static LED_BRIGHTNESS: f32 = 0.05;
+
+enum LedBrightness {
+    Dim,
+    Bright,
+    Off,
+}
+
+impl LedBrightness {
+    fn next(self) -> LedBrightness {
+        match self {
+            LedBrightness::Dim => LedBrightness::Bright,
+            LedBrightness::Bright => LedBrightness::Off,
+            LedBrightness::Off => LedBrightness::Dim,
+        }
+    }
+
+    fn value(&self) -> f32 {
+        match self {
+            LedBrightness::Dim => 0.05,
+            LedBrightness::Bright => 1.0,
+            LedBrightness::Off => 0.0,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Colour(pub u8, pub u8, pub u8);
+
+impl Colour {
+    fn black() -> Colour {
+        Colour(0, 0, 0)
+    }
+}
 
 pub struct Bucket {
     name: String,
@@ -89,6 +122,10 @@ impl ColourRange {
         }
         unreachable!();
     }
+
+    pub fn all(&self, colour: Colour) -> Vec<Colour> {
+        vec![colour; self.num_pixels as usize]
+    }
 }
 
 pub struct Event {
@@ -100,7 +137,7 @@ impl Event {
     pub fn new(message: Message) -> Event {
         Event {
             stamp: Utc::now(),
-            message: message,
+            message,
         }
     }
 
@@ -115,11 +152,10 @@ impl Event {
 
 pub enum Message {
     Environment(Measurement),
+    TapEvent,
 }
 
-pub fn start_am2320(loop_sleep: u64) -> Receiver<Event> {
-    let (sender, receiver) = sync_channel(1);
-
+pub fn start_environment_sensor(sender: SyncSender<Event>, loop_sleep: u64) {
     thread::spawn(move || {
         let device = I2c::new().expect("could not initialise I2C");
         let delay = Delay::new();
@@ -161,7 +197,6 @@ pub fn start_am2320(loop_sleep: u64) -> Receiver<Event> {
             thread::sleep(time::Duration::from_secs(loop_sleep));
         }
     });
-    receiver
 }
 
 fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
@@ -193,8 +228,27 @@ fn clone_measurement(measurement: &Measurement) -> Measurement {
     }
 }
 
+pub fn start_vibration_sensor(sender: SyncSender<Event>) {
+    let gpio = Gpio::new().unwrap();
+    let mut pin = gpio.get(17).unwrap().into_input();
+    pin.set_interrupt(Trigger::RisingEdge).unwrap();
+    thread::spawn(move || loop {
+        match pin.poll_interrupt(true, None) {
+            Ok(_) => {
+                if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
+                    eprintln!("Failed to write tap event to channel: {:?}", err);
+                }
+            }
+
+            Err(err) => {
+                eprintln!("Failure detecting tap event: {:?}", err);
+            }
+        }
+    });
+}
+
 pub trait LEDs {
-    fn show(&mut self, colours: Vec<Colour>, brightness: f32) -> Result<(), String>;
+    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String>;
 }
 
 pub struct BlinktLEDs {
@@ -216,7 +270,7 @@ impl Default for BlinktLEDs {
 }
 
 impl LEDs for &mut BlinktLEDs {
-    fn show(&mut self, colours: Vec<Colour>, brightness: f32) -> Result<(), String> {
+    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
         for (pixel, colour) in colours.iter().enumerate() {
             self.blinkt
                 .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
@@ -235,6 +289,8 @@ pub fn main_loop(
     mut leds: impl LEDs,
     colour_range: ColourRange,
 ) -> Result<(), String> {
+    let mut led_brightness = LedBrightness::Dim;
+    let mut pixels = colour_range.all(Colour::black());
     for event in events.iter() {
         match event.message() {
             Message::Environment(measurement) => {
@@ -247,12 +303,17 @@ pub fn main_loop(
                 );
 
                 // calculate pixels
-                let pixels = colour_range.get_pixels(measurement.temperature as f32);
+                pixels = colour_range.get_pixels(measurement.temperature as f32);
 
-                // update Blinkt
-                leds.show(pixels, LED_BRIGHTNESS)?;
+
+            }
+            Message::TapEvent => {
+                led_brightness = led_brightness.next();
+                println!("{},tap,0,0", event.stamp.to_rfc3339());
             }
         }
+        // update Blinkt
+        leds.show(&pixels, led_brightness.value())?;
     }
     Ok(())
 }
@@ -260,6 +321,8 @@ pub fn main_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::mpsc::sync_channel;
 
     #[test]
     fn cannot_create_colour_range_with_no_buckets() {
@@ -364,4 +427,88 @@ mod tests {
         assert!(!measurement_is_roughly_equal(&previous_data, &new_data));
     }
 
+    fn new_measurement_event(temperature: f64, humidity: f64) -> Event {
+        Event::new(Message::Environment(Measurement {
+            temperature,
+            humidity,
+        }))
+    }
+
+    struct MockLEDs {
+        called: bool,
+        last_colours: Vec<Colour>,
+        last_brightness: f32,
+
+
+    }
+
+    impl MockLEDs {
+        fn new() -> MockLEDs {
+            MockLEDs {
+                called: false,
+                last_colours: vec![],
+                last_brightness: 0.0,
+            }
+        }
+    }
+
+    impl LEDs for &mut MockLEDs {
+        fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
+            self.called = true;
+            self.last_colours = Vec::from(colours);
+            self.last_brightness = brightness;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn main_loop_does_not_set_leds_if_no_events_are_received() {
+        // arrange
+        let (sender, receiver) = sync_channel(10);
+        let mut leds = MockLEDs::new();
+        let colour_range = get_colour_range();
+
+        // act
+        drop(sender);
+        main_loop(receiver, &mut leds, colour_range).unwrap();
+
+        // assert
+        assert!(!leds.called);
+    }
+
+    #[test]
+    fn main_loop_sets_leds_correctly_on_new_measurement_data() {
+        // arrange
+        let (sender, receiver) = sync_channel(10);
+        let mut leds = MockLEDs::new();
+        let colour_range = get_colour_range();
+
+        // act
+        sender.send(new_measurement_event(12.0, 13.0)).unwrap();
+        drop(sender);
+        main_loop(receiver, &mut leds, colour_range).unwrap();
+
+        // assert
+        assert!(leds.called);
+        assert_eq!(leds.last_colours, vec![Colour(10, 10, 226); 8]);
+        assert_eq!(leds.last_brightness, 0.05);
+    }
+
+    #[test]
+    fn main_loop_sets_leds_correctly_on_new_tap_events() {
+        // arrange
+        let (sender, receiver) = sync_channel(10);
+        let mut leds = MockLEDs::new();
+        let colour_range = get_colour_range();
+
+        // act
+        sender.send(Event::new(Message::TapEvent)).unwrap();
+        drop(sender);
+        main_loop(receiver, &mut leds, colour_range).unwrap();
+
+        // assert
+        assert!(leds.called);
+        assert_eq!(leds.last_colours, vec![Colour(0, 0, 0); 8]);
+        assert_eq!(leds.last_brightness, 1.0);
+    }
 }

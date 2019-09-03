@@ -1,11 +1,18 @@
 extern crate glow;
 extern crate rppal;
 
-use glow::start_am2320;
-use glow::{main_loop, BlinktLEDs, Bucket, Colour, ColourRange};
+use std::sync::mpsc::sync_channel;
+use glow::{
+    start_environment_sensor, start_vibration_sensor,
+    main_loop, BlinktLEDs, Bucket, Colour, ColourRange,
+};
 
 fn main() -> Result<(), String> {
-    let receiver = environment::start_am2320(30);
+    let (sender, receiver) = sync_channel(1);
+
+    start_environment_sensor(sender.clone(), 30);
+    start_vibration_sensor(sender.clone());
+
     let mut leds = BlinktLEDs::new();
 
     let colour_range = ColourRange::new(vec![
