@@ -304,8 +304,6 @@ pub fn main_loop(
 
                 // calculate pixels
                 pixels = colour_range.get_pixels(measurement.temperature as f32);
-
-
             }
             Message::TapEvent => {
                 led_brightness = led_brightness.next();
@@ -438,8 +436,6 @@ mod tests {
         called: bool,
         last_colours: Vec<Colour>,
         last_brightness: f32,
-
-
     }
 
     impl MockLEDs {

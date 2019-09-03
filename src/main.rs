@@ -1,11 +1,11 @@
 extern crate glow;
 extern crate rppal;
 
-use std::sync::mpsc::sync_channel;
 use glow::{
-    start_environment_sensor, start_vibration_sensor,
-    main_loop, BlinktLEDs, Bucket, Colour, ColourRange,
+    main_loop, start_environment_sensor, start_vibration_sensor, BlinktLEDs, Bucket, Colour,
+    ColourRange,
 };
+use std::sync::mpsc::sync_channel;
 
 fn main() -> Result<(), String> {
     let (sender, receiver) = sync_channel(1);
