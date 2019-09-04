@@ -17,6 +17,8 @@ use rppal::{
 
 static NUM_PIXELS: u8 = 8;
 static ERROR_LIMIT: u8 = 3;
+static INTERRUPT_PIN: u8 = 17;
+static INTERRUPT_BOUNCE: u128 = 300;
 
 enum LedBrightness {
     Dim,
@@ -36,7 +38,7 @@ impl LedBrightness {
     fn value(&self) -> f32 {
         match self {
             LedBrightness::Dim => 0.05,
-            LedBrightness::Bright => 1.0,
+            LedBrightness::Bright => 0.5,
             LedBrightness::Off => 0.0,
         }
     }
@@ -206,7 +208,7 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
             Ok(measurement) => return Some(measurement),
             Err(err) => {
                 error_count += 1;
-                eprintln!("{:?}", err);
+                eprintln!("Failed to read AM2320: {:?}", err);
                 if error_count > ERROR_LIMIT {
                     eprintln!("too many errors, failing");
                     return None;
@@ -230,18 +232,28 @@ fn clone_measurement(measurement: &Measurement) -> Measurement {
 
 pub fn start_vibration_sensor(sender: SyncSender<Event>) {
     let gpio = Gpio::new().unwrap();
-    let mut pin = gpio.get(17).unwrap().into_input();
-    pin.set_interrupt(Trigger::RisingEdge).unwrap();
-    thread::spawn(move || loop {
-        match pin.poll_interrupt(true, None) {
-            Ok(_) => {
-                if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
-                    eprintln!("Failed to write tap event to channel: {:?}", err);
+    let mut pin = gpio.get(INTERRUPT_PIN).unwrap().into_input_pullup();
+    pin.set_interrupt(Trigger::FallingEdge).unwrap();
+    thread::spawn(move || {
+        let mut last_event = time::Instant::now();
+        loop {
+            match pin.poll_interrupt(true, None) {
+                Ok(Some(_)) => {
+                    if last_event.elapsed().as_millis() > INTERRUPT_BOUNCE {
+                        last_event = time::Instant::now();
+                        if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
+                            eprintln!("Failed to write tap event to channel: {:?}", err);
+                        }
+                    }
                 }
-            }
 
-            Err(err) => {
-                eprintln!("Failure detecting tap event: {:?}", err);
+                Ok(None) => {
+                    eprintln!("No interrupt to handle");
+                }
+
+                Err(err) => {
+                    eprintln!("Failure detecting tap event: {:?}", err);
+                }
             }
         }
     });
@@ -277,7 +289,7 @@ impl LEDs for &mut BlinktLEDs {
         }
 
         if let Err(err) = self.blinkt.show() {
-            Err(format!("{:?}", err))
+            Err(format!("Failed to write LEDs: {:?}", err))
         } else {
             Ok(())
         }
