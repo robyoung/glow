@@ -1,0 +1,12 @@
+[Unit]
+Description=Home Grown Glow
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi
+ExecStart=/bin/bash -c './glow | tee -a ./environment.log'
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
