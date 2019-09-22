@@ -9,7 +9,7 @@ pub enum LedBrightness {
 }
 
 impl LedBrightness {
-    pub fn next(self) -> LedBrightness {
+    pub fn next(&self) -> LedBrightness {
         match self {
             LedBrightness::Dim => LedBrightness::Bright,
             LedBrightness::Bright => LedBrightness::Off,
@@ -134,7 +134,7 @@ impl Default for BlinktLEDs {
     }
 }
 
-impl LEDs for &mut BlinktLEDs {
+impl LEDs for BlinktLEDs {
     fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
         for (pixel, colour) in colours.iter().enumerate() {
             self.blinkt

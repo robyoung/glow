@@ -1,18 +1,14 @@
 extern crate glow;
 extern crate rppal;
 
+use std::{env};
+
 use glow::leds::{BlinktLEDs, Colour, ColourBucket, ColourRange};
-use glow::{main_loop, start_environment_sensor, start_vibration_sensor};
-use std::sync::mpsc::sync_channel;
+use glow::events::{EventSource, EventHandler, run_loop};
+use glow::{start_environment_sensor, start_vibration_sensor};
+use glow::{PrintMeasurementHandler, LEDHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
-    let (sender, receiver) = sync_channel(1);
-
-    start_environment_sensor(sender.clone(), 30);
-    start_vibration_sensor(sender.clone());
-
-    let mut leds = BlinktLEDs::new();
-
     let colour_range = ColourRange::new(vec![
         ColourBucket::new("blue", 14.0, Colour(10, 10, 226)),
         ColourBucket::new("orange", 18.0, Colour(120, 20, 0)),
@@ -20,6 +16,19 @@ fn main() -> Result<(), String> {
         ColourBucket::new("coral", 26.0, Colour(255, 1, 1)),
         ColourBucket::new("red", 30.0, Colour(255, 0, 100)),
     ])?;
+    let leds = BlinktLEDs::new();
+    let webhook_url = format!(
+        "https://maker.ifttt.com/trigger/glow-data/with/key/{}",
+        env::var("IFTTT_WEBHOOK_KEY").unwrap()
+    );
 
-    main_loop(receiver, &mut leds, colour_range)
+    let sources: Vec<EventSource> = vec![start_environment_sensor, start_vibration_sensor];
+    let handlers: Vec<Box<dyn EventHandler>> = vec![
+        Box::new(PrintMeasurementHandler {}),
+        Box::new(LEDHandler::new(leds, colour_range)),
+        Box::new(WebHookHandler::new(webhook_url)),
+    ];
+
+    run_loop(sources, handlers);
+    Ok(())
 }

@@ -3,11 +3,15 @@ extern crate blinkt;
 extern crate chrono;
 
 pub mod leds;
+pub mod events;
 
-use std::sync::mpsc::{Receiver, SyncSender};
-use std::{thread, time};
+use std::{
+    collections::HashMap,
+    sync::mpsc::SyncSender,
+    thread, time,
+};
 
-use am2320::{Measurement, AM2320};
+use am2320::AM2320;
 
 use chrono::{offset::Utc, DateTime};
 use rppal::{
@@ -16,40 +20,17 @@ use rppal::{
     i2c::I2c,
 };
 
+use reqwest;
+
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness};
+use crate::events::{Event, Message, Measurement, EventHandler};
 
 static ERROR_LIMIT: u8 = 3;
 static INTERRUPT_PIN: u8 = 17;
 static INTERRUPT_BOUNCE: u128 = 300;
 
-pub struct Event {
-    stamp: DateTime<Utc>,
-    message: Message,
-}
 
-impl Event {
-    pub fn new(message: Message) -> Event {
-        Event {
-            stamp: Utc::now(),
-            message,
-        }
-    }
-
-    pub fn stamp(&self) -> DateTime<Utc> {
-        self.stamp
-    }
-
-    pub fn message(&self) -> &Message {
-        &self.message
-    }
-}
-
-pub enum Message {
-    Environment(Measurement),
-    TapEvent,
-}
-
-pub fn start_environment_sensor(sender: SyncSender<Event>, loop_sleep: u64) {
+pub fn start_environment_sensor(sender: SyncSender<Event>) {
     thread::spawn(move || {
         let device = I2c::new().expect("could not initialise I2C");
         let delay = Delay::new();
@@ -76,7 +57,7 @@ pub fn start_environment_sensor(sender: SyncSender<Event>, loop_sleep: u64) {
                     } else {
                         previous_data = Some(clone_measurement(&measurement));
 
-                        Some(Event::new(Message::Environment(measurement)))
+                        Some(Event::new_envirornment(measurement.temperature, measurement.humidity))
                     }
                 }
                 None => None,
@@ -88,7 +69,7 @@ pub fn start_environment_sensor(sender: SyncSender<Event>, loop_sleep: u64) {
                 }
             }
 
-            thread::sleep(time::Duration::from_secs(loop_sleep));
+            thread::sleep(time::Duration::from_secs(30));
         }
     });
 }
@@ -97,7 +78,7 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
     let mut error_count: u8 = 0;
     loop {
         match sensor.read() {
-            Ok(measurement) => return Some(measurement),
+            Ok(m) => return Some(Measurement::new(m.temperature, m.humidity)),
             Err(err) => {
                 error_count += 1;
                 eprintln!("Failed to read AM2320: {:?}", err);
@@ -120,6 +101,14 @@ fn clone_measurement(measurement: &Measurement) -> Measurement {
         temperature: measurement.temperature,
         humidity: measurement.humidity,
     }
+}
+
+fn measurement_as_map(stamp: DateTime<Utc>, measurement: &Measurement) -> HashMap<&str, String> {
+    let mut result = HashMap::new();
+    result.insert("stamp", stamp.to_rfc3339());
+    result.insert("temperature", format!("{}", measurement.temperature));
+    result.insert("humidity", format!("{}", measurement.humidity));
+    result
 }
 
 pub fn start_vibration_sensor(sender: SyncSender<Event>) {
@@ -151,56 +140,98 @@ pub fn start_vibration_sensor(sender: SyncSender<Event>) {
     });
 }
 
-pub fn main_loop(
-    events: Receiver<Event>,
-    mut leds: impl LEDs,
-    colour_range: ColourRange,
-) -> Result<(), String> {
-    let mut led_brightness = LedBrightness::Dim;
-    let mut pixels = colour_range.all(Colour::black());
-    for event in events.iter() {
-        match event.message() {
-            Message::Environment(measurement) => {
-                // print csv
-                println!(
-                    "{},data,{},{}",
-                    event.stamp.to_rfc3339(),
-                    measurement.temperature,
-                    measurement.humidity
-                );
+pub struct PrintMeasurementHandler;
 
-                // calculate pixels
-                pixels = colour_range.get_pixels(measurement.temperature as f32);
-            }
+impl PrintMeasurementHandler {
+    fn print(&self, event: &Event, name: &str, temperature: f64, humidity: f64) {
+        println!("{},{},{},{}", event.stamp().to_rfc3339(), name, temperature, humidity);
+    }
+}
+
+impl EventHandler for PrintMeasurementHandler {
+    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
+        match event.message() {
+            Message::Environment(measurement) => self.print(
+                event, "data", 
+                measurement.temperature,
+                measurement.humidity,
+            ),
+            Message::TapEvent => self.print(
+                event, "tap", 0.0, 0.0
+            ),
+            _ => {},
+        }
+    }
+}
+
+pub struct LEDHandler {
+    leds: Box<dyn LEDs>,
+    colour_range: ColourRange,
+    colours: Vec<Colour>,
+    brightness: LedBrightness,
+}
+
+impl LEDHandler {
+    pub fn new(leds: impl LEDs + 'static, colour_range: ColourRange) -> LEDHandler {
+        let colours = colour_range.all(Colour::black());
+        LEDHandler {
+            leds: Box::new(leds),
+            colour_range,
+            colours,
+            brightness: LedBrightness::Dim,
+        }
+    }
+}
+
+impl EventHandler for LEDHandler {
+    fn handle(&mut self, event: &Event, sender: &SyncSender<Event>) {
+        let message = event.message();
+        match message {
+            Message::Environment(measurement) => {
+                self.colours = self.colour_range.get_pixels(measurement.temperature as f32);
+                sender.send(Event::new(Message::UpdateLEDs)).unwrap();
+            },
             Message::TapEvent => {
-                led_brightness = led_brightness.next();
-                println!("{},tap,0,0", event.stamp.to_rfc3339());
+                self.brightness = self.brightness.next();
+                sender.send(Event::new(Message::UpdateLEDs)).unwrap();
+            },
+            Message::UpdateLEDs => {
+                if let Err(err) = self.leds.show(&self.colours, self.brightness.value()) {
+                    eprintln!("{}", err);
+                }
+            },
+        }
+    }
+}
+
+pub struct WebHookHandler {
+    client: reqwest::Client,
+    url: String,
+}
+
+impl WebHookHandler {
+    pub fn new(url: String) -> WebHookHandler {
+        WebHookHandler {
+            client: reqwest::Client::new(),
+            url,
+        }
+    }
+}
+
+impl EventHandler for WebHookHandler {
+    fn handle(&mut self, event: &Event, _sender: &SyncSender<Event>) {
+        if let Message::Environment(measurement) = event.message() {
+            let payload = measurement_as_map(event.stamp(), measurement);
+            if let Err(err) = self.client.post(self.url.as_str()).json(&payload).send() {
+                eprintln!("Failed to send to IFTTT: {:?}", err);
             }
         }
-        // update Blinkt
-        leds.show(&pixels, led_brightness.value())?;
     }
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::leds::ColourBucket;
-
-    use std::sync::mpsc::sync_channel;
-
-    fn get_colour_range() -> ColourRange {
-        ColourRange::new(vec![
-            ColourBucket::new("blue", 14.0, Colour(10, 10, 226)),
-            ColourBucket::new("orange", 18.0, Colour(120, 20, 0)),
-            ColourBucket::new("salmon", 22.0, Colour(160, 10, 1)),
-            ColourBucket::new("coral", 26.0, Colour(255, 1, 1)),
-            ColourBucket::new("red", 30.0, Colour(255, 0, 100)),
-        ])
-        .unwrap()
-    }
 
     #[test]
     fn data_is_roughly_equal_when_within_limits() {
@@ -232,88 +263,5 @@ mod tests {
 
         // assert
         assert!(!measurement_is_roughly_equal(&previous_data, &new_data));
-    }
-
-    fn new_measurement_event(temperature: f64, humidity: f64) -> Event {
-        Event::new(Message::Environment(Measurement {
-            temperature,
-            humidity,
-        }))
-    }
-
-    struct MockLEDs {
-        called: bool,
-        last_colours: Vec<Colour>,
-        last_brightness: f32,
-    }
-
-    impl MockLEDs {
-        fn new() -> MockLEDs {
-            MockLEDs {
-                called: false,
-                last_colours: vec![],
-                last_brightness: 0.0,
-            }
-        }
-    }
-
-    impl LEDs for &mut MockLEDs {
-        fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
-            self.called = true;
-            self.last_colours = Vec::from(colours);
-            self.last_brightness = brightness;
-            Ok(())
-        }
-    }
-
-    #[test]
-    fn main_loop_does_not_set_leds_if_no_events_are_received() {
-        // arrange
-        let (sender, receiver) = sync_channel(10);
-        let mut leds = MockLEDs::new();
-        let colour_range = get_colour_range();
-
-        // act
-        drop(sender);
-        main_loop(receiver, &mut leds, colour_range).unwrap();
-
-        // assert
-        assert!(!leds.called);
-    }
-
-    #[test]
-    fn main_loop_sets_leds_correctly_on_new_measurement_data() {
-        // arrange
-        let (sender, receiver) = sync_channel(10);
-        let mut leds = MockLEDs::new();
-        let colour_range = get_colour_range();
-
-        // act
-        sender.send(new_measurement_event(12.0, 13.0)).unwrap();
-        drop(sender);
-        main_loop(receiver, &mut leds, colour_range).unwrap();
-
-        // assert
-        assert!(leds.called);
-        assert_eq!(leds.last_colours, vec![Colour(10, 10, 226); 8]);
-        assert_eq!(leds.last_brightness, 0.05);
-    }
-
-    #[test]
-    fn main_loop_sets_leds_correctly_on_new_tap_events() {
-        // arrange
-        let (sender, receiver) = sync_channel(10);
-        let mut leds = MockLEDs::new();
-        let colour_range = get_colour_range();
-
-        // act
-        sender.send(Event::new(Message::TapEvent)).unwrap();
-        drop(sender);
-        main_loop(receiver, &mut leds, colour_range).unwrap();
-
-        // assert
-        assert!(leds.called);
-        assert_eq!(leds.last_colours, vec![Colour(0, 0, 0); 8]);
-        assert_eq!(leds.last_brightness, 0.5);
     }
 }
