@@ -4,9 +4,17 @@ version = "0.1.0"
 authors = ["Rob Young <rob@robyoung.digital>"]
 edition = "2018"
 
+[profile.release]
+opt-level = 3
+
 [dependencies]
 embedded-hal = "0.2"
 chrono = "0.4"
 blinkt = "0.5"
 am2320 = "0.1.1"
 rppal = { version = "0.11.3", features = ["hal"] }
+
+[dependencies.reqwest]
+version = "0.9"
+default-features = false
+features = ["rustls-tls"]
