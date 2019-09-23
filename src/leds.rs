@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use blinkt::Blinkt;
 
 static NUM_PIXELS: u8 = 8;
@@ -59,6 +60,33 @@ impl ColourBucket {
     }
 }
 
+impl Ord for ColourBucket {
+    fn cmp(&self, other: &ColourBucket) -> Ordering {
+        if self.value < other.value {
+            Ordering::Less
+        } else if self.value > other.value {
+            Ordering::Greater
+        } else {
+            Ordering::Equal
+        }
+    }
+}
+
+impl PartialOrd for ColourBucket {
+    fn partial_cmp(&self, other: &ColourBucket) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+
+impl PartialEq for ColourBucket {
+    fn eq(&self, other: &ColourBucket) -> bool {
+        self.name == other.name && self.value == other.value && self.colour == other.colour
+    }
+}
+
+impl Eq for ColourBucket {}
+
 pub struct ColourRange {
     buckets: Vec<ColourBucket>,
     num_pixels: u8,
@@ -69,14 +97,14 @@ impl ColourRange {
         if buckets.is_empty() {
             Err("not long enough".to_string())
         } else {
+            let mut buckets_slice = buckets.into_boxed_slice();
+            buckets_slice.sort_unstable();
             Ok(ColourRange {
-                buckets,
+                buckets: buckets_slice.into_vec(),
                 num_pixels: NUM_PIXELS,
             })
         }
     }
-
-    // TODO: sort buckets?
 
     pub fn get_pixels(&self, value: f32) -> Vec<Colour> {
         let first = self.buckets.first().unwrap();
