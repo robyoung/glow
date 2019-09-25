@@ -193,11 +193,17 @@ impl EventHandler for LEDHandler {
             },
             Message::TapEvent => {
                 self.brightness = self.brightness.next();
+                sender.send(Event::new(Message::LEDParty)).unwrap();
                 sender.send(Event::new(Message::UpdateLEDs)).unwrap();
+            },
+            Message::LEDParty => {
+                if let Err(err) = self.leds.party() {
+                    eprintln!("party error: {}", err);
+                }
             },
             Message::UpdateLEDs => {
                 if let Err(err) = self.leds.show(&self.colours, self.brightness.value()) {
-                    eprintln!("{}", err);
+                    eprintln!("show error: {}", err);
                 }
             },
         }

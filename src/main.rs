@@ -17,17 +17,20 @@ fn main() -> Result<(), String> {
         ColourBucket::new("red", 30.0, Colour(255, 0, 100)),
     ])?;
     let leds = BlinktLEDs::new();
-    let webhook_url = format!(
-        "https://maker.ifttt.com/trigger/glow-data/with/key/{}",
-        env::var("IFTTT_WEBHOOK_KEY").unwrap()
-    );
 
     let sources: Vec<EventSource> = vec![start_environment_sensor, start_vibration_sensor];
-    let handlers: Vec<Box<dyn EventHandler>> = vec![
+    let mut handlers: Vec<Box<dyn EventHandler>> = vec![
         Box::new(PrintMeasurementHandler {}),
         Box::new(LEDHandler::new(leds, colour_range)),
-        Box::new(WebHookHandler::new(webhook_url)),
     ];
+
+    if let Ok(ifttt_webhook_key) = env::var("IFTTT_WEBHOOK_KEY") {
+
+        let webhook_url = format!(
+            "https://maker.ifttt.com/trigger/glow-data/with/key/{}", ifttt_webhook_key
+        );
+        handlers.push(Box::new(WebHookHandler::new(webhook_url)));
+    }
 
     run_loop(sources, handlers);
     Ok(())

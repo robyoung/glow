@@ -33,6 +33,7 @@ pub enum Message {
     Environment(Measurement),
     TapEvent,
     UpdateLEDs,
+    LEDParty,
 }
 
 #[derive(Debug)]

@@ -1,7 +1,9 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, thread, time};
+
 use blinkt::Blinkt;
 
-static NUM_PIXELS: u8 = 8;
+
+const NUM_PIXELS: u8 = 8;
 
 pub enum LedBrightness {
     Dim,
@@ -27,12 +29,24 @@ impl LedBrightness {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub struct Colour(pub u8, pub u8, pub u8);
 
 impl Colour {
     pub fn black() -> Colour {
         Colour(0, 0, 0)
+    }
+
+    pub fn red() -> Colour {
+        Colour(255, 0, 0)
+    }
+
+    pub fn green() -> Colour {
+        Colour(0, 255, 0)
+    }
+
+    pub fn blue() -> Colour {
+        Colour(10, 10, 226)
     }
 }
 
@@ -109,12 +123,12 @@ impl ColourRange {
     pub fn get_pixels(&self, value: f32) -> Vec<Colour> {
         let first = self.buckets.first().unwrap();
         if value <= first.value {
-            return vec![first.colour.clone(); self.num_pixels as usize];
+            return vec![first.colour; self.num_pixels as usize];
         }
 
         let last = self.buckets.last().unwrap();
         if value >= last.value {
-            return vec![last.colour.clone(); self.num_pixels as usize];
+            return vec![last.colour; self.num_pixels as usize];
         }
 
         for i in 0..self.buckets.len() - 1 {
@@ -126,8 +140,8 @@ impl ColourRange {
                     (f32::from(self.num_pixels) * (bottom_to_value / bottom_to_top)).round() as u8;
 
                 let mut pixels =
-                    vec![bottom.colour.clone(); (self.num_pixels - num_pixels) as usize];
-                let top_pixels = vec![top.colour.clone(); num_pixels as usize];
+                    vec![bottom.colour; (self.num_pixels - num_pixels) as usize];
+                let top_pixels = vec![top.colour; num_pixels as usize];
                 pixels.extend(top_pixels);
                 return pixels;
             }
@@ -141,6 +155,20 @@ impl ColourRange {
 }
 
 pub trait LEDs {
+    fn party(&mut self) -> Result<(), String> {
+        let colours = [Colour::red(), Colour::green(), Colour::blue()];
+        let mut current_colours = [Colour::black(); NUM_PIXELS as usize];
+
+        for colour in colours.iter() {
+            for i in 0..NUM_PIXELS {
+                current_colours[i as usize] = *colour;
+                self.show(&current_colours, LedBrightness::Bright.value())?;
+                thread::sleep(time::Duration::from_millis(300));
+            }
+        }
+        Ok(())
+    }
+
     fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String>;
 }
 
