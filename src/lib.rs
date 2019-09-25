@@ -206,6 +206,7 @@ impl EventHandler for LEDHandler {
                     eprintln!("show error: {}", err);
                 }
             },
+            _ => {},
         }
     }
 }
