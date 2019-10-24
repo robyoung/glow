@@ -163,7 +163,7 @@ pub trait LEDs {
             for i in 0..NUM_PIXELS {
                 current_colours[i as usize] = *colour;
                 self.show(&current_colours, LedBrightness::Bright.value())?;
-                thread::sleep(time::Duration::from_millis(300));
+                thread::sleep(time::Duration::from_millis(50));
             }
         }
         Ok(())
