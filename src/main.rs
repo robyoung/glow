@@ -1,5 +1,8 @@
 extern crate glow;
 extern crate rppal;
+extern crate env_logger;
+#[macro_use] extern crate log;
+
 
 use std::{env};
 
@@ -9,6 +12,8 @@ use glow::{start_environment_sensor, start_vibration_sensor};
 use glow::{PrintMeasurementHandler, LEDHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
+    env_logger::init();
+
     let colour_range = ColourRange::new(vec![
         ColourBucket::new("blue", 14.0, Colour(10, 10, 226)),
         ColourBucket::new("orange", 18.0, Colour(120, 20, 0)),
@@ -25,7 +30,7 @@ fn main() -> Result<(), String> {
     ];
 
     if let Ok(ifttt_webhook_key) = env::var("IFTTT_WEBHOOK_KEY") {
-        eprintln!("Adding IFTTT web hook handler");
+        debug!("Adding IFTTT web hook handler");
 
         let webhook_url = format!(
             "https://maker.ifttt.com/trigger/glow-data/with/key/{}", ifttt_webhook_key

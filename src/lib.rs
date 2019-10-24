@@ -1,6 +1,7 @@
 extern crate am2320;
 extern crate blinkt;
 extern crate chrono;
+#[macro_use] extern crate log;
 
 pub mod leds;
 pub mod events;
@@ -43,7 +44,7 @@ pub fn start_environment_sensor(sender: SyncSender<Event>) {
                 Some(measurement) => {
                     let unchanged = if let Some(previous_data) = &previous_data {
                         if measurement_is_roughly_equal(previous_data, &measurement) {
-                            eprintln!("Skipping unchanged data");
+                            debug!("Skipping unchanged data");
                             true
                         } else {
                             false
@@ -65,7 +66,7 @@ pub fn start_environment_sensor(sender: SyncSender<Event>) {
 
             if let Some(event) = event {
                 if let Err(err) = sender.send(event) {
-                    eprintln!("Failed to write sensor data to channel: {:?}", err);
+                    warn!("Failed to write sensor data to channel: {:?}", err);
                 }
             }
 
@@ -81,9 +82,9 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
             Ok(m) => return Some(Measurement::new(m.temperature, m.humidity)),
             Err(err) => {
                 error_count += 1;
-                eprintln!("Failed to read AM2320: {:?}", err);
+                warn!("Failed to read AM2320: {:?}", err);
                 if error_count > ERROR_LIMIT {
-                    eprintln!("too many errors, failing");
+                    error!("too many errors, failing");
                     return None;
                 }
             }
@@ -123,17 +124,17 @@ pub fn start_vibration_sensor(sender: SyncSender<Event>) {
                     if last_event.elapsed().as_millis() > INTERRUPT_BOUNCE {
                         last_event = time::Instant::now();
                         if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
-                            eprintln!("Failed to write tap event to channel: {:?}", err);
+                            error!("Failed to write tap event to channel: {:?}", err);
                         }
                     }
                 }
 
                 Ok(None) => {
-                    eprintln!("No interrupt to handle");
+                    info!("No interrupt to handle");
                 }
 
                 Err(err) => {
-                    eprintln!("Failure detecting tap event: {:?}", err);
+                    error!("Failure detecting tap event: {:?}", err);
                 }
             }
         }
@@ -198,12 +199,12 @@ impl EventHandler for LEDHandler {
             },
             Message::LEDParty => {
                 if let Err(err) = self.leds.party() {
-                    eprintln!("party error: {}", err);
+                    error!("party error: {}", err);
                 }
             },
             Message::UpdateLEDs => {
                 if let Err(err) = self.leds.show(&self.colours, self.brightness.value()) {
-                    eprintln!("show error: {}", err);
+                    error!("show error: {}", err);
                 }
             },
             _ => {},
@@ -232,16 +233,16 @@ impl EventHandler for WebHookHandler {
         if let Message::Environment(measurement) = event.message() {
             if self.last_send < time::Instant::now() - time::Duration::from_secs(60 * 30) {
                 let payload = measurement_as_map(event.stamp(), measurement);
-                eprintln!("IFTTT payload {:?}", payload);
+                debug!("IFTTT payload {:?}", payload);
                 match self.client.post(self.url.as_str()).json(&payload).build() {
                     Ok(request) => {
-                        eprintln!("IFTTT request {:?}", request);
+                        debug!("IFTTT request {:?}", request);
                         if let Err(err) = self.client.execute(request) {
-                            eprintln!("Failed to send to IFTTT: {:?}", err);
+                            error!("Failed to send to IFTTT: {:?}", err);
                         }
                     },
                     Err(err) => {
-                        eprintln!("Failed to build IFTTT request: {:?}", err);
+                        error!("Failed to build IFTTT request: {:?}", err);
                     }
                 }
                 self.last_send = time::Instant::now();

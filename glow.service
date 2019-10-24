@@ -8,6 +8,7 @@ ExecStart=/home/pi/glow
 Restart=always
 RestartSec=1
 Environment=IFTTT_WEBHOOK_KEY=${IFTTT_WEBHOOK_KEY}
+Environment=RUST_LOG=info
 
 [Install]
 WantedBy=multi-user.target
