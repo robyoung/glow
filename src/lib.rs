@@ -105,9 +105,9 @@ fn clone_measurement(measurement: &Measurement) -> Measurement {
 
 fn measurement_as_map(stamp: DateTime<Utc>, measurement: &Measurement) -> HashMap<&str, String> {
     let mut result = HashMap::new();
-    result.insert("stamp", stamp.to_rfc3339());
-    result.insert("temperature", format!("{}", measurement.temperature));
-    result.insert("humidity", format!("{}", measurement.humidity));
+    result.insert("value1", stamp.to_rfc3339());
+    result.insert("value2", format!("{}", measurement.temperature));
+    result.insert("value3", format!("{}", measurement.humidity));
     result
 }
 
@@ -214,6 +214,7 @@ impl EventHandler for LEDHandler {
 pub struct WebHookHandler {
     client: reqwest::Client,
     url: String,
+    last_send: time::Instant,
 }
 
 impl WebHookHandler {
@@ -221,6 +222,7 @@ impl WebHookHandler {
         WebHookHandler {
             client: reqwest::Client::new(),
             url,
+            last_send: time::Instant::now() - time::Duration::from_secs(100000),
         }
     }
 }
@@ -228,9 +230,21 @@ impl WebHookHandler {
 impl EventHandler for WebHookHandler {
     fn handle(&mut self, event: &Event, _sender: &SyncSender<Event>) {
         if let Message::Environment(measurement) = event.message() {
-            let payload = measurement_as_map(event.stamp(), measurement);
-            if let Err(err) = self.client.post(self.url.as_str()).json(&payload).send() {
-                eprintln!("Failed to send to IFTTT: {:?}", err);
+            if self.last_send < time::Instant::now() - time::Duration::from_secs(60 * 30) {
+                let payload = measurement_as_map(event.stamp(), measurement);
+                eprintln!("IFTTT payload {:?}", payload);
+                match self.client.post(self.url.as_str()).json(&payload).build() {
+                    Ok(request) => {
+                        eprintln!("IFTTT request {:?}", request);
+                        if let Err(err) = self.client.execute(request) {
+                            eprintln!("Failed to send to IFTTT: {:?}", err);
+                        }
+                    },
+                    Err(err) => {
+                        eprintln!("Failed to build IFTTT request: {:?}", err);
+                    }
+                }
+                self.last_send = time::Instant::now();
             }
         }
     }
