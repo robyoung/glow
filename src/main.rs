@@ -9,7 +9,7 @@ use std::{env};
 use glow::leds::{BlinktLEDs, Colour, ColourBucket, ColourRange};
 use glow::events::{EventSource, EventHandler, run_loop};
 use glow::{start_environment_sensor, start_vibration_sensor};
-use glow::{PrintMeasurementHandler, LEDHandler, WebHookHandler};
+use glow::{LEDHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
@@ -23,9 +23,11 @@ fn main() -> Result<(), String> {
     ])?;
     let leds = BlinktLEDs::new();
 
-    let sources: Vec<EventSource> = vec![start_environment_sensor, start_vibration_sensor];
+    let sources: Vec<EventSource> = vec![
+        start_environment_sensor,
+        start_vibration_sensor,
+    ];
     let mut handlers: Vec<Box<dyn EventHandler>> = vec![
-        Box::new(PrintMeasurementHandler {}),
         Box::new(LEDHandler::new(leds, colour_range)),
     ];
 
