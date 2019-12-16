@@ -1,31 +1,84 @@
-use std::{cmp::Ordering, thread, time};
+use std::{
+    cell::Cell,
+    cmp::Ordering,
+    thread,
+    time,
+};
 
 use blinkt::Blinkt;
 
 
 const NUM_PIXELS: u8 = 8;
 
-pub enum LedBrightness {
+pub trait LedBrightness {
+    fn next(&mut self);
+    fn value(&self) -> f32;
+}
+
+pub enum StaticLedBrightness {
     Dim,
     Bright,
     Off,
 }
 
-impl LedBrightness {
-    pub fn next(&self) -> LedBrightness {
-        match self {
-            LedBrightness::Dim => LedBrightness::Bright,
-            LedBrightness::Bright => LedBrightness::Off,
-            LedBrightness::Off => LedBrightness::Dim,
-        }
+impl LedBrightness for StaticLedBrightness {
+    fn next(&mut self) {
+        *self = match self {
+            StaticLedBrightness::Dim =>    StaticLedBrightness::Bright,
+            StaticLedBrightness::Bright => StaticLedBrightness::Off,
+            StaticLedBrightness::Off =>    StaticLedBrightness::Dim,
+        };
     }
 
-    pub fn value(&self) -> f32 {
+    fn value(&self) -> f32 {
         match self {
-            LedBrightness::Dim => 0.05,
-            LedBrightness::Bright => 0.5,
-            LedBrightness::Off => 0.0,
+            StaticLedBrightness::Dim => 0.05,
+            StaticLedBrightness::Bright => 0.5,
+            StaticLedBrightness::Off => 0.0,
         }
+    }
+}
+
+pub struct DynamicLEDBrightness {
+    client: reqwest::Client,
+    url: String,
+    last_received: time::Instant,
+    current_value: Cell<Option<f32>>,
+}
+
+impl DynamicLEDBrightness {
+    pub fn new(url: String) -> DynamicLEDBrightness {
+        DynamicLEDBrightness {
+            client: reqwest::Client::new(),
+            url,
+            last_received: time::Instant::now() - time::Duration::from_secs(100_000),
+            current_value: Cell::new(None),
+        }
+    }
+}
+
+impl LedBrightness for DynamicLEDBrightness {
+    fn next(&mut self) {}
+    fn value(&self) -> f32 {
+        if self.current_value.get().is_none() || self.last_received.elapsed() > time::Duration::from_secs(10) {
+            match self.client.get(self.url.as_str()).send() {
+                Ok(mut resp) => {
+                    if let Ok(data) = resp.text() {
+                        if let Ok(value) = data.trim().parse::<f32>() {
+                            self.current_value.set(Some(value));
+                        } else {
+                            error!("Failed to parse LED brightness value: {}", data);
+                        }
+                    } else {
+                        error!("Failed to read LED brightness response");
+                    }
+                },
+                Err(err) => {
+                    error!("Failed to get new LED brightness value: {}", err);
+                },
+            }
+        }
+        self.current_value.get().unwrap()
     }
 }
 
@@ -162,7 +215,7 @@ pub trait LEDs {
         for colour in colours.iter() {
             for i in 0..NUM_PIXELS {
                 current_colours[i as usize] = *colour;
-                self.show(&current_colours, LedBrightness::Bright.value())?;
+                self.show(&current_colours, StaticLedBrightness::Bright.value())?;
                 thread::sleep(time::Duration::from_millis(50));
             }
         }

@@ -23,56 +23,59 @@ use rppal::{
 
 use reqwest;
 
-use crate::leds::{Colour, ColourRange, LEDs, LedBrightness};
-use crate::events::{Event, Message, Measurement, EventHandler};
+use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
+use crate::events::{Event, Message, Measurement, EventHandler, EventSource};
 
 static ERROR_LIMIT: u8 = 3;
 static INTERRUPT_PIN: u8 = 17;
 static INTERRUPT_BOUNCE: u128 = 300;
 
+pub struct EnvironmentSensor {}
 
-pub fn start_environment_sensor(sender: SyncSender<Event>) {
-    thread::spawn(move || {
-        let device = I2c::new().expect("could not initialise I2C");
-        let delay = Delay::new();
+impl EventSource for EnvironmentSensor {
+    fn start(&self, sender: SyncSender<Event>) {
+        thread::spawn(move || {
+            let device = I2c::new().expect("could not initialise I2C");
+            let delay = Delay::new();
 
-        let mut am2320 = AM2320::new(device, delay);
-        let mut previous_data: Option<Measurement> = None;
+            let mut am2320 = AM2320::new(device, delay);
+            let mut previous_data: Option<Measurement> = None;
 
-        loop {
-            let event = match read_am2320(&mut am2320) {
-                Some(measurement) => {
-                    let unchanged = if let Some(previous_data) = &previous_data {
-                        if measurement_is_roughly_equal(previous_data, &measurement) {
-                            debug!("Skipping unchanged data");
-                            true
+            loop {
+                let event = match read_am2320(&mut am2320) {
+                    Some(measurement) => {
+                        let unchanged = if let Some(previous_data) = &previous_data {
+                            if measurement_is_roughly_equal(previous_data, &measurement) {
+                                debug!("Skipping unchanged data");
+                                true
+                            } else {
+                                false
+                            }
                         } else {
                             false
+                        };
+
+                        if unchanged {
+                            None
+                        } else {
+                            previous_data = Some(clone_measurement(&measurement));
+
+                            Some(Event::new_envirornment(measurement.temperature, measurement.humidity))
                         }
-                    } else {
-                        false
-                    };
+                    }
+                    None => None,
+                };
 
-                    if unchanged {
-                        None
-                    } else {
-                        previous_data = Some(clone_measurement(&measurement));
-
-                        Some(Event::new_envirornment(measurement.temperature, measurement.humidity))
+                if let Some(event) = event {
+                    if let Err(err) = sender.send(event) {
+                        warn!("Failed to write sensor data to channel: {:?}", err);
                     }
                 }
-                None => None,
-            };
 
-            if let Some(event) = event {
-                if let Err(err) = sender.send(event) {
-                    warn!("Failed to write sensor data to channel: {:?}", err);
-                }
+                thread::sleep(time::Duration::from_secs(30));
             }
-
-            thread::sleep(time::Duration::from_secs(30));
-        }
-    });
+        });
+    }
 }
 
 fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
@@ -112,33 +115,38 @@ fn measurement_as_map(stamp: DateTime<Utc>, measurement: &Measurement) -> HashMa
     result
 }
 
-pub fn start_vibration_sensor(sender: SyncSender<Event>) {
-    let gpio = Gpio::new().unwrap();
-    let mut pin = gpio.get(INTERRUPT_PIN).unwrap().into_input_pullup();
-    pin.set_interrupt(Trigger::FallingEdge).unwrap();
-    thread::spawn(move || {
-        let mut last_event = time::Instant::now();
-        loop {
-            match pin.poll_interrupt(true, None) {
-                Ok(Some(_)) => {
-                    if last_event.elapsed().as_millis() > INTERRUPT_BOUNCE {
-                        last_event = time::Instant::now();
-                        if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
-                            error!("Failed to write tap event to channel: {:?}", err);
+pub struct VibrationSensor {}
+
+impl EventSource for VibrationSensor {
+
+    fn start(&self, sender: SyncSender<Event>) {
+        let gpio = Gpio::new().unwrap();
+        let mut pin = gpio.get(INTERRUPT_PIN).unwrap().into_input_pullup();
+        pin.set_interrupt(Trigger::FallingEdge).unwrap();
+        thread::spawn(move || {
+            let mut last_event = time::Instant::now();
+            loop {
+                match pin.poll_interrupt(true, None) {
+                    Ok(Some(_)) => {
+                        if last_event.elapsed().as_millis() > INTERRUPT_BOUNCE {
+                            last_event = time::Instant::now();
+                            if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
+                                error!("Failed to write tap event to channel: {:?}", err);
+                            }
                         }
                     }
-                }
 
-                Ok(None) => {
-                    info!("No interrupt to handle");
-                }
+                    Ok(None) => {
+                        info!("No interrupt to handle");
+                    }
 
-                Err(err) => {
-                    error!("Failure detecting tap event: {:?}", err);
+                    Err(err) => {
+                        error!("Failure detecting tap event: {:?}", err);
+                    }
                 }
             }
-        }
-    });
+        });
+    }
 }
 
 pub struct PrintMeasurementHandler;
@@ -169,18 +177,27 @@ pub struct LEDHandler {
     leds: Box<dyn LEDs>,
     colour_range: ColourRange,
     colours: Vec<Colour>,
-    brightness: LedBrightness,
+    brightness: Box<dyn LedBrightness>,
 }
 
 impl LEDHandler {
-    pub fn new(leds: impl LEDs + 'static, colour_range: ColourRange) -> LEDHandler {
+    pub fn new(leds: impl LEDs + 'static, colour_range: ColourRange) -> Self {
+        Self::new_with_brightness(leds, colour_range, StaticLedBrightness::Dim)
+    }
+
+    pub fn new_with_brightness(
+        leds: impl LEDs + 'static,
+        colour_range: ColourRange,
+        brightness: impl LedBrightness + 'static
+    ) -> Self {
         let colours = colour_range.all(Colour::black());
-        LEDHandler {
+        Self {
             leds: Box::new(leds),
             colour_range,
             colours,
-            brightness: LedBrightness::Dim,
+            brightness: Box::new(brightness),
         }
+
     }
 }
 
@@ -193,7 +210,7 @@ impl EventHandler for LEDHandler {
                 sender.send(Event::new(Message::UpdateLEDs)).unwrap();
             },
             Message::TapEvent => {
-                self.brightness = self.brightness.next();
+                self.brightness.next();
                 sender.send(Event::new(Message::LEDParty)).unwrap();
                 sender.send(Event::new(Message::UpdateLEDs)).unwrap();
             },
@@ -223,7 +240,7 @@ impl WebHookHandler {
         WebHookHandler {
             client: reqwest::Client::new(),
             url,
-            last_send: time::Instant::now() - time::Duration::from_secs(100000),
+            last_send: time::Instant::now() - time::Duration::from_secs(100_000),
         }
     }
 }

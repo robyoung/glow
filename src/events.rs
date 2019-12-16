@@ -49,17 +49,19 @@ impl Measurement {
     }
 }
 
-pub type EventSource = fn(SyncSender<Event>);
+pub trait EventSource {
+    fn start(&self, sender: SyncSender<Event>);
+}
 
 pub trait EventHandler {
     fn handle(&mut self, event: &Event, sender: &SyncSender<Event>);
 }
 
-pub fn run_loop(sources: Vec<EventSource>, mut handlers: Vec<Box<dyn EventHandler>>) {
+pub fn run_loop(sources: Vec<Box<dyn EventSource>>, mut handlers: Vec<Box<dyn EventHandler>>) {
     let (sender, receiver) = sync_channel(20);
 
     for source in sources {
-        source(sender.clone());
+        source.start(sender.clone());
     }
 
     for event in receiver.iter() {
@@ -96,9 +98,13 @@ mod tests {
         assert_eq!(*event.message(), Message::Environment(Measurement::new(12.12, 13.13)));
     }
 
-    fn send_one_source(sender: SyncSender<Event>) {
-        sender.send(Event::new(Message::TapEvent)).unwrap();
-        sender.send(Event::new(Message::Stop)).unwrap();
+    struct SendOneSource {}
+
+    impl EventSource for SendOneSource {
+        fn start(&self, sender: SyncSender<Event>) {
+            sender.send(Event::new(Message::TapEvent)).unwrap();
+            sender.send(Event::new(Message::Stop)).unwrap();
+        }
     }
 
     struct StoringEventReceiver {
@@ -118,7 +124,7 @@ mod tests {
         let handler = StoringEventReceiver { events: sender };
 
         // act
-        run_loop(vec![send_one_source], vec![Box::new(handler)]);
+        run_loop(vec![Box::new(SendOneSource {})], vec![Box::new(handler)]);
 
         // assert
         let events = receiver.iter().collect::<Vec<Event>>();
