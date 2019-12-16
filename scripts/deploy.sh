@@ -2,7 +2,7 @@
 
 set -e
 
-TARGET_DIR="./target/arm-unknown-linux-gnueabihf/release"
+TARGET_DIR="./target/arm-unknown-linux-musleabihf/release"
 TARGET="${TARGET_DIR}/glow"
 
 fail() {
@@ -16,7 +16,7 @@ fail() {
 
 
 ssh $BOBNET_GLOW_DEPLOY_TARGET hostname > /dev/null
-rustup run nightly cargo build --quiet --release --target=arm-unknown-linux-gnueabihf
+cross build --release --target=arm-unknown-linux-musleabihf
 md5sum --quiet -c ${TARGET}.md5sum && {
   >&2 echo "No change to release binary"
   exit 1
