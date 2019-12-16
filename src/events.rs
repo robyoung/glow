@@ -1,5 +1,5 @@
 use chrono::{offset::Utc, DateTime};
-use std::sync::mpsc::{SyncSender, sync_channel};
+use std::sync::mpsc::{sync_channel, SyncSender};
 
 #[derive(Debug, Clone)]
 pub struct Event {
@@ -16,7 +16,10 @@ impl Event {
     }
 
     pub fn new_envirornment(temperature: f64, humidity: f64) -> Event {
-        Self::new(Message::Environment(Measurement::new(temperature, humidity)))
+        Self::new(Message::Environment(Measurement::new(
+            temperature,
+            humidity,
+        )))
     }
 
     pub fn stamp(&self) -> DateTime<Utc> {
@@ -45,7 +48,10 @@ pub struct Measurement {
 
 impl Measurement {
     pub fn new(temperature: f64, humidity: f64) -> Self {
-        Self { temperature, humidity }
+        Self {
+            temperature,
+            humidity,
+        }
     }
 }
 
@@ -95,7 +101,10 @@ mod tests {
         let event = Event::new_envirornment(12.12, 13.13);
 
         // assert
-        assert_eq!(*event.message(), Message::Environment(Measurement::new(12.12, 13.13)));
+        assert_eq!(
+            *event.message(),
+            Message::Environment(Measurement::new(12.12, 13.13))
+        );
     }
 
     struct SendOneSource {}
@@ -108,7 +117,7 @@ mod tests {
     }
 
     struct StoringEventReceiver {
-        events: SyncSender<Event>
+        events: SyncSender<Event>,
     }
 
     impl EventHandler for StoringEventReceiver {

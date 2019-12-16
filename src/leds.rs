@@ -1,12 +1,6 @@
-use std::{
-    cell::Cell,
-    cmp::Ordering,
-    thread,
-    time,
-};
+use std::{cell::Cell, cmp::Ordering, thread, time};
 
 use blinkt::Blinkt;
-
 
 const NUM_PIXELS: u8 = 8;
 
@@ -24,9 +18,9 @@ pub enum StaticLedBrightness {
 impl LedBrightness for StaticLedBrightness {
     fn next(&mut self) {
         *self = match self {
-            StaticLedBrightness::Dim =>    StaticLedBrightness::Bright,
+            StaticLedBrightness::Dim => StaticLedBrightness::Bright,
             StaticLedBrightness::Bright => StaticLedBrightness::Off,
-            StaticLedBrightness::Off =>    StaticLedBrightness::Dim,
+            StaticLedBrightness::Off => StaticLedBrightness::Dim,
         };
     }
 
@@ -60,7 +54,9 @@ impl DynamicLEDBrightness {
 impl LedBrightness for DynamicLEDBrightness {
     fn next(&mut self) {}
     fn value(&self) -> f32 {
-        if self.current_value.get().is_none() || self.last_received.elapsed() > time::Duration::from_secs(10) {
+        if self.current_value.get().is_none()
+            || self.last_received.elapsed() > time::Duration::from_secs(10)
+        {
             match self.client.get(self.url.as_str()).send() {
                 Ok(mut resp) => {
                     if let Ok(data) = resp.text() {
@@ -72,10 +68,10 @@ impl LedBrightness for DynamicLEDBrightness {
                     } else {
                         error!("Failed to read LED brightness response");
                     }
-                },
+                }
                 Err(err) => {
                     error!("Failed to get new LED brightness value: {}", err);
-                },
+                }
             }
         }
         self.current_value.get().unwrap()
@@ -145,7 +141,6 @@ impl PartialOrd for ColourBucket {
     }
 }
 
-
 impl PartialEq for ColourBucket {
     fn eq(&self, other: &ColourBucket) -> bool {
         self.name == other.name && self.value == other.value && self.colour == other.colour
@@ -192,8 +187,7 @@ impl ColourRange {
                 let num_pixels =
                     (f32::from(self.num_pixels) * (bottom_to_value / bottom_to_top)).round() as u8;
 
-                let mut pixels =
-                    vec![bottom.colour; (self.num_pixels - num_pixels) as usize];
+                let mut pixels = vec![bottom.colour; (self.num_pixels - num_pixels) as usize];
                 let top_pixels = vec![top.colour; num_pixels as usize];
                 pixels.extend(top_pixels);
                 return pixels;
@@ -237,6 +231,16 @@ impl BlinktLEDs {
     }
 }
 
+pub(self) fn get_blinkt_brightness(pixel: usize, brightness: f32) -> f32 {
+    if (pixel == 1 || pixel == 6) && brightness <= 0.02 {
+        0.0
+    } else if (pixel == 3 || pixel == 4) && brightness <= 0.01 {
+        0.0
+    } else {
+        brightness
+    }
+}
+
 impl Default for BlinktLEDs {
     fn default() -> Self {
         Self::new()
@@ -244,10 +248,16 @@ impl Default for BlinktLEDs {
 }
 
 impl LEDs for BlinktLEDs {
+    // TODO: maybe refactor so that Colour includes brightness
     fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
         for (pixel, colour) in colours.iter().enumerate() {
-            self.blinkt
-                .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
+            self.blinkt.set_pixel_rgbb(
+                pixel,
+                colour.0,
+                colour.1,
+                colour.2,
+                get_blinkt_brightness(pixel, brightness),
+            );
         }
 
         if let Err(err) = self.blinkt.show() {
@@ -330,6 +340,31 @@ mod tests {
                 Colour(120, 20, 0),
                 Colour(120, 20, 0)
             ]
+        );
+    }
+
+    #[test]
+    fn test_blinkt_brightness_unchanged() {
+        let brightnesses = [0.1 as f32; 8]
+            .into_iter()
+            .enumerate()
+            .map(|(pixel, brightness)| get_blinkt_brightness(pixel, *brightness))
+            .collect::<Vec<f32>>();
+
+        assert_eq!(brightnesses, vec![0.1 as f32; 8]);
+    }
+
+    #[test]
+    fn test_blinkt_brightness_disabled_leds() {
+        let brightnesses = [0.01 as f32; 8]
+            .into_iter()
+            .enumerate()
+            .map(|(pixel, brightness)| get_blinkt_brightness(pixel, *brightness))
+            .collect::<Vec<f32>>();
+
+        assert_eq!(
+            brightnesses,
+            vec![0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01]
         );
     }
 }

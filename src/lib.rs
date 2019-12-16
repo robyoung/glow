@@ -1,16 +1,13 @@
 extern crate am2320;
 extern crate blinkt;
 extern crate chrono;
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
-pub mod leds;
 pub mod events;
+pub mod leds;
 
-use std::{
-    collections::HashMap,
-    sync::mpsc::SyncSender,
-    thread, time,
-};
+use std::{collections::HashMap, sync::mpsc::SyncSender, thread, time};
 
 use am2320::AM2320;
 
@@ -23,8 +20,8 @@ use rppal::{
 
 use reqwest;
 
+use crate::events::{Event, EventHandler, EventSource, Measurement, Message};
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
-use crate::events::{Event, Message, Measurement, EventHandler, EventSource};
 
 static ERROR_LIMIT: u8 = 3;
 static INTERRUPT_PIN: u8 = 17;
@@ -60,7 +57,10 @@ impl EventSource for EnvironmentSensor {
                         } else {
                             previous_data = Some(clone_measurement(&measurement));
 
-                            Some(Event::new_envirornment(measurement.temperature, measurement.humidity))
+                            Some(Event::new_envirornment(
+                                measurement.temperature,
+                                measurement.humidity,
+                            ))
                         }
                     }
                     None => None,
@@ -118,7 +118,6 @@ fn measurement_as_map(stamp: DateTime<Utc>, measurement: &Measurement) -> HashMa
 pub struct VibrationSensor {}
 
 impl EventSource for VibrationSensor {
-
     fn start(&self, sender: SyncSender<Event>) {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio.get(INTERRUPT_PIN).unwrap().into_input_pullup();
@@ -153,22 +152,24 @@ pub struct PrintMeasurementHandler;
 
 impl PrintMeasurementHandler {
     fn print(&self, event: &Event, name: &str, temperature: f64, humidity: f64) {
-        println!("{},{},{},{}", event.stamp().to_rfc3339(), name, temperature, humidity);
+        println!(
+            "{},{},{},{}",
+            event.stamp().to_rfc3339(),
+            name,
+            temperature,
+            humidity
+        );
     }
 }
 
 impl EventHandler for PrintMeasurementHandler {
     fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
         match event.message() {
-            Message::Environment(measurement) => self.print(
-                event, "data", 
-                measurement.temperature,
-                measurement.humidity,
-            ),
-            Message::TapEvent => self.print(
-                event, "tap", 0.0, 0.0
-            ),
-            _ => {},
+            Message::Environment(measurement) => {
+                self.print(event, "data", measurement.temperature, measurement.humidity)
+            }
+            Message::TapEvent => self.print(event, "tap", 0.0, 0.0),
+            _ => {}
         }
     }
 }
@@ -188,7 +189,7 @@ impl LEDHandler {
     pub fn new_with_brightness(
         leds: impl LEDs + 'static,
         colour_range: ColourRange,
-        brightness: impl LedBrightness + 'static
+        brightness: impl LedBrightness + 'static,
     ) -> Self {
         let colours = colour_range.all(Colour::black());
         Self {
@@ -197,7 +198,6 @@ impl LEDHandler {
             colours,
             brightness: Box::new(brightness),
         }
-
     }
 }
 
@@ -208,23 +208,23 @@ impl EventHandler for LEDHandler {
             Message::Environment(measurement) => {
                 self.colours = self.colour_range.get_pixels(measurement.temperature as f32);
                 sender.send(Event::new(Message::UpdateLEDs)).unwrap();
-            },
+            }
             Message::TapEvent => {
                 self.brightness.next();
                 sender.send(Event::new(Message::LEDParty)).unwrap();
                 sender.send(Event::new(Message::UpdateLEDs)).unwrap();
-            },
+            }
             Message::LEDParty => {
                 if let Err(err) = self.leds.party() {
                     error!("party error: {}", err);
                 }
-            },
+            }
             Message::UpdateLEDs => {
                 if let Err(err) = self.leds.show(&self.colours, self.brightness.value()) {
                     error!("show error: {}", err);
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
 }
@@ -257,7 +257,7 @@ impl EventHandler for WebHookHandler {
                         if let Err(err) = self.client.execute(request) {
                             error!("Failed to send to IFTTT: {:?}", err);
                         }
-                    },
+                    }
                     Err(err) => {
                         error!("Failed to build IFTTT request: {:?}", err);
                     }
