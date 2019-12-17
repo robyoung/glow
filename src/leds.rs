@@ -232,10 +232,14 @@ impl BlinktLEDs {
 }
 
 pub(self) fn get_blinkt_brightness(pixel: usize, brightness: f32) -> f32 {
-    if (pixel == 1 || pixel == 6) && brightness <= 0.02 {
+    if pixel == 1 && brightness <= 0.03 {
+        0.0
+    } else if pixel == 6 && brightness <= 0.02 {
         0.0
     } else if (pixel == 3 || pixel == 4) && brightness <= 0.01 {
         0.0
+    } else if brightness < 0.04 {
+        0.04
     } else {
         brightness
     }
