@@ -57,6 +57,7 @@ impl LedBrightness for DynamicLEDBrightness {
         if self.current_value.get().is_none()
             || self.last_received.elapsed() > time::Duration::from_secs(10)
         {
+            debug!("Updating LED brightness");
             match self.client.get(self.url.as_str()).send() {
                 Ok(mut resp) => {
                     if let Ok(data) = resp.text() {
@@ -232,11 +233,13 @@ impl BlinktLEDs {
 }
 
 pub(self) fn get_blinkt_brightness(pixel: usize, brightness: f32) -> f32 {
-    if pixel == 1 && brightness <= 0.03 {
+    if [1, 2, 3, 4, 5, 6].contains(&pixel) && brightness== 0.01 {
         0.0
-    } else if pixel == 6 && brightness <= 0.02 {
+    } else if [1, 2, 5, 6].contains(&pixel) && brightness == 0.02 {
         0.0
-    } else if (pixel == 3 || pixel == 4) && brightness <= 0.01 {
+    } else if [1, 4].contains(&pixel) && brightness == 0.03 {
+        0.0
+    } else if brightness < 0.01 {
         0.0
     } else if brightness < 0.04 {
         0.04
@@ -347,28 +350,26 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_blinkt_brightness_unchanged() {
-        let brightnesses = [0.1 as f32; 8]
+    fn test_blinkt_brightness_helper(brightness: f32, expected: [f32; 8]) {
+        let actual = [brightness; 8]
             .into_iter()
             .enumerate()
             .map(|(pixel, brightness)| get_blinkt_brightness(pixel, *brightness))
             .collect::<Vec<f32>>();
 
-        assert_eq!(brightnesses, vec![0.1 as f32; 8]);
+        assert_eq!(expected, actual.as_slice());
     }
 
     #[test]
-    fn test_blinkt_brightness_disabled_leds() {
-        let brightnesses = [0.01 as f32; 8]
-            .into_iter()
-            .enumerate()
-            .map(|(pixel, brightness)| get_blinkt_brightness(pixel, *brightness))
-            .collect::<Vec<f32>>();
-
-        assert_eq!(
-            brightnesses,
-            vec![0.01, 0.0, 0.01, 0.0, 0.0, 0.01, 0.0, 0.01]
-        );
+    fn test_blinkt_brightness() {
+        test_blinkt_brightness_helper(0.0, [0.0; 8]);
+        test_blinkt_brightness_helper(0.005, [0.0; 8]);
+        test_blinkt_brightness_helper(0.01, [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04]);
+        test_blinkt_brightness_helper(0.02, [0.04, 0.0, 0.0, 0.04, 0.04, 0.0, 0.0, 0.04]);
+        test_blinkt_brightness_helper(0.03, [0.04, 0.0, 0.04, 0.04, 0.0, 0.04, 0.04, 0.04]);
+        test_blinkt_brightness_helper(0.03, [0.04, 0.0, 0.04, 0.04, 0.0, 0.04, 0.04, 0.04]);
+        test_blinkt_brightness_helper(0.04, [0.04; 8]);
+        test_blinkt_brightness_helper(0.05, [0.05; 8]);
+        test_blinkt_brightness_helper(0.1, [0.1; 8]);
     }
 }
