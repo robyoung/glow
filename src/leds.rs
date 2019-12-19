@@ -232,6 +232,17 @@ impl BlinktLEDs {
     }
 }
 
+/// calculate brightness to send to Blinkt
+///
+/// The Blinkt will switch a LED off with a brightness of less than 0.04.
+/// However, we can reduce the overall brightness by reducing the number of
+/// LEDs that are switched on. There are 8 LEDs on the Blinkt the illumination
+/// pattern below 0.04 will be as follows.
+///
+/// 0.01  *      *
+/// 0.02  *  **  *
+/// 0.03  * ** ***
+/// 0.04  ********
 pub(self) fn get_blinkt_brightness(pixel: usize, brightness: f32) -> f32 {
     if [1, 2, 3, 4, 5, 6].contains(&pixel) && brightness== 0.01 {
         0.0
