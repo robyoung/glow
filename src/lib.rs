@@ -29,6 +29,8 @@ static INTERRUPT_BOUNCE: u128 = 300;
 
 pub struct EnvironmentSensor {}
 
+const ENVIRONMENT_SENSOR_SLEEP: u64 = 2;
+
 impl EventSource for EnvironmentSensor {
     fn start(&self, sender: SyncSender<Event>) {
         thread::spawn(move || {
@@ -72,7 +74,7 @@ impl EventSource for EnvironmentSensor {
                     }
                 }
 
-                thread::sleep(time::Duration::from_secs(30));
+                thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP));
             }
         });
     }
@@ -85,9 +87,8 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
             Ok(m) => return Some(Measurement::new(m.temperature, m.humidity)),
             Err(err) => {
                 error_count += 1;
-                warn!("Failed to read AM2320: {:?}", err);
                 if error_count > ERROR_LIMIT {
-                    error!("too many errors, failing");
+                    error!("too many errors, failing: {:?}", err);
                     return None;
                 }
             }
@@ -229,10 +230,14 @@ impl EventHandler for LEDHandler {
     }
 }
 
+const WEB_HOOK_PREVIOUS_VALUES: usize = 40;
+
 pub struct WebHookHandler {
     client: reqwest::Client,
     url: String,
     last_send: time::Instant,
+    last_value: Option<Measurement>,
+    previous_values: [Option<Measurement>; WEB_HOOK_PREVIOUS_VALUES],
 }
 
 impl WebHookHandler {
@@ -241,14 +246,51 @@ impl WebHookHandler {
             client: reqwest::Client::new(),
             url,
             last_send: time::Instant::now() - time::Duration::from_secs(100_000),
+            last_value: None,
+            previous_values: [None; WEB_HOOK_PREVIOUS_VALUES],
         }
+    }
+
+    fn should_send(&mut self, measurement: Measurement) -> bool {
+        let should_send = if self.last_value.is_none() {
+            // we have not sent a value yet
+            true
+        } else if self.last_value.unwrap() == measurement {
+            // current value is the same as the last one sent
+            false
+        } else if self.last_send.elapsed() < time::Duration::from_secs(60) {
+            // we already sent a value less than 60 seconds ago
+            false
+        } else {
+            // more than half of the previous values are different to the last sent one
+            self.previous_values
+                .iter()
+                .filter(|value| match value {
+                    None => false,
+                    Some(value) => self.last_value.unwrap().temperature != (*value).temperature,
+                })
+                .count() as f64
+                / WEB_HOOK_PREVIOUS_VALUES as f64
+                > 0.9
+        };
+
+        // push the new value
+        self.previous_values.rotate_right(1);
+        self.previous_values[0] = Some(measurement);
+
+        if should_send {
+            self.last_value = Some(measurement);
+            self.last_send = time::Instant::now();
+        }
+
+        should_send
     }
 }
 
 impl EventHandler for WebHookHandler {
     fn handle(&mut self, event: &Event, _sender: &SyncSender<Event>) {
         if let Message::Environment(measurement) = event.message() {
-            if self.last_send < time::Instant::now() - time::Duration::from_secs(60 * 30) {
+            if self.should_send(*measurement) {
                 let payload = measurement_as_map(event.stamp(), measurement);
                 debug!("IFTTT payload {:?}", payload);
                 match self.client.post(self.url.as_str()).json(&payload).build() {
@@ -262,7 +304,6 @@ impl EventHandler for WebHookHandler {
                         error!("Failed to build IFTTT request: {:?}", err);
                     }
                 }
-                self.last_send = time::Instant::now();
             }
         }
     }

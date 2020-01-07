@@ -40,6 +40,8 @@ pub struct DynamicLEDBrightness {
     current_value: Cell<Option<f32>>,
 }
 
+const LED_BRIGHTNESS_UPDATE_TIME: u64 = 2;
+
 impl DynamicLEDBrightness {
     pub fn new(url: String) -> DynamicLEDBrightness {
         DynamicLEDBrightness {
@@ -55,7 +57,7 @@ impl LedBrightness for DynamicLEDBrightness {
     fn next(&mut self) {}
     fn value(&self) -> f32 {
         if self.current_value.get().is_none()
-            || self.last_received.elapsed() > time::Duration::from_secs(10)
+            || self.last_received.elapsed() > time::Duration::from_secs(LED_BRIGHTNESS_UPDATE_TIME)
         {
             debug!("Updating LED brightness");
             match self.client.get(self.url.as_str()).send() {
@@ -222,13 +224,35 @@ pub trait LEDs {
 
 pub struct BlinktLEDs {
     blinkt: Blinkt,
+    current: Option<(Vec<Colour>, f32)>,
 }
 
 impl BlinktLEDs {
     pub fn new() -> Self {
         Self {
             blinkt: Blinkt::new().unwrap(),
+            current: None,
         }
+    }
+
+    fn should_update(&mut self, colours: &[Colour], brightness: f32) -> bool {
+        let result = match &self.current {
+            None => true,
+            Some(current) => {
+                if current.1 != brightness {
+                    true
+                } else if colours.iter().zip(current.0.iter()).any(|(&a, &b)| a != b) {
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+        if result {
+            self.current = Some((colours.to_vec(), brightness));
+        }
+
+        result
     }
 }
 
@@ -244,7 +268,7 @@ impl BlinktLEDs {
 /// 0.03  * ** ***
 /// 0.04  ********
 pub(self) fn get_blinkt_brightness(pixel: usize, brightness: f32) -> f32 {
-    if [1, 2, 3, 4, 5, 6].contains(&pixel) && brightness== 0.01 {
+    if [1, 2, 3, 4, 5, 6].contains(&pixel) && brightness == 0.01 {
         0.0
     } else if [1, 2, 5, 6].contains(&pixel) && brightness == 0.02 {
         0.0
@@ -268,21 +292,23 @@ impl Default for BlinktLEDs {
 impl LEDs for BlinktLEDs {
     // TODO: maybe refactor so that Colour includes brightness
     fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
-        for (pixel, colour) in colours.iter().enumerate() {
-            self.blinkt.set_pixel_rgbb(
-                pixel,
-                colour.0,
-                colour.1,
-                colour.2,
-                get_blinkt_brightness(pixel, brightness),
-            );
+        if self.should_update(colours, brightness) {
+            for (pixel, colour) in colours.iter().enumerate() {
+                self.blinkt.set_pixel_rgbb(
+                    pixel,
+                    colour.0,
+                    colour.1,
+                    colour.2,
+                    get_blinkt_brightness(pixel, brightness),
+                );
+            }
+
+            if let Err(err) = self.blinkt.show() {
+                return Err(format!("Failed to write LEDs: {:?}", err));
+            }
         }
 
-        if let Err(err) = self.blinkt.show() {
-            Err(format!("Failed to write LEDs: {:?}", err))
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 }
 

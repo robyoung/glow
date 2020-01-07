@@ -40,7 +40,7 @@ pub enum Message {
     Stop,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Measurement {
     pub temperature: f64,
     pub humidity: f64,
