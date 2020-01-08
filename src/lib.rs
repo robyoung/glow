@@ -23,13 +23,13 @@ use reqwest;
 use crate::events::{Event, EventHandler, EventSource, Measurement, Message};
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
 
-static ERROR_LIMIT: u8 = 3;
-static INTERRUPT_PIN: u8 = 17;
-static INTERRUPT_BOUNCE: u128 = 300;
 
 pub struct EnvironmentSensor {}
 
-const ENVIRONMENT_SENSOR_SLEEP: u64 = 2;
+const VIBRATION_SENSOR_INTERRUPT_PIN: u8 = 17;
+const VIBRATION_SENSOR_INTERRUPT_BOUNCE: u128 = 300;
+const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 5;
+const ENVIRONMENT_SENSOR_SLEEP: u64 = 5;
 
 impl EventSource for EnvironmentSensor {
     fn start(&self, sender: SyncSender<Event>) {
@@ -87,7 +87,7 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
             Ok(m) => return Some(Measurement::new(m.temperature, m.humidity)),
             Err(err) => {
                 error_count += 1;
-                if error_count > ERROR_LIMIT {
+                if error_count > ENVIRONMENT_SENSOR_ERROR_LIMIT {
                     error!("too many errors, failing: {:?}", err);
                     return None;
                 }
@@ -121,14 +121,14 @@ pub struct VibrationSensor {}
 impl EventSource for VibrationSensor {
     fn start(&self, sender: SyncSender<Event>) {
         let gpio = Gpio::new().unwrap();
-        let mut pin = gpio.get(INTERRUPT_PIN).unwrap().into_input_pullup();
+        let mut pin = gpio.get(VIBRATION_SENSOR_INTERRUPT_PIN).unwrap().into_input_pullup();
         pin.set_interrupt(Trigger::FallingEdge).unwrap();
         thread::spawn(move || {
             let mut last_event = time::Instant::now();
             loop {
                 match pin.poll_interrupt(true, None) {
                     Ok(Some(_)) => {
-                        if last_event.elapsed().as_millis() > INTERRUPT_BOUNCE {
+                        if last_event.elapsed().as_millis() > VIBRATION_SENSOR_INTERRUPT_BOUNCE {
                             last_event = time::Instant::now();
                             if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
                                 error!("Failed to write tap event to channel: {:?}", err);
