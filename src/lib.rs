@@ -39,6 +39,7 @@ impl EventSource for EnvironmentSensor {
 
             let mut am2320 = AM2320::new(device, delay);
             let mut previous_data: Option<Measurement> = None;
+            let mut missed_events: u64 = 0;
 
             loop {
                 let event = match read_am2320(&mut am2320) {
@@ -69,12 +70,17 @@ impl EventSource for EnvironmentSensor {
                 };
 
                 if let Some(event) = event {
+                    missed_events = 0;
                     if let Err(err) = sender.send(event) {
                         warn!("Failed to write sensor data to channel: {:?}", err);
                     }
+                } else if missed_events < 5 {
+                    missed_events += 1;
+                } else {
+                    panic!("Too many missed environment measurements. Shutting down.");
                 }
 
-                thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP));
+                thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP * (missed_events + 1)));
             }
         });
     }
