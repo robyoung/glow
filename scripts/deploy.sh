@@ -2,7 +2,8 @@
 
 set -e
 
-TARGET_DIR="./target/arm-unknown-linux-musleabihf/release"
+TRIPPLE="arm-unknown-linux-musleabihf"
+TARGET_DIR="./target/${TRIPPLE}/release"
 TARGET="${TARGET_DIR}/glow"
 
 fail() {
@@ -16,7 +17,15 @@ fail() {
 
 
 ssh $BOBNET_GLOW_DEPLOY_TARGET hostname > /dev/null
-cross build --release --target=arm-unknown-linux-musleabihf
+cross build --release --target=$TRIPPLE
+
+image=$(docker images --format '{{.Repository}}:{{.Tag}}' rustembedded/cross | grep $TRIPPLE)
+docker \
+  run --rm -ti \
+  -v $(pwd):/usr/src/glow \
+  $image \
+  /usr/local/arm-linux-musleabihf/bin/strip /usr/src/glow/${TARGET}
+
 md5sum --quiet -c ${TARGET}.md5sum && {
   >&2 echo "No change to release binary"
   exit 1
