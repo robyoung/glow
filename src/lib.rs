@@ -23,12 +23,12 @@ use reqwest;
 use crate::events::{Event, EventHandler, EventSource, Measurement, Message};
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
 
-
 pub struct EnvironmentSensor {}
 
 const VIBRATION_SENSOR_INTERRUPT_PIN: u8 = 17;
 const VIBRATION_SENSOR_INTERRUPT_BOUNCE: u128 = 300;
-const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 5;
+const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 3;
+const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
 const ENVIRONMENT_SENSOR_SLEEP: u64 = 5;
 
 impl EventSource for EnvironmentSensor {
@@ -39,63 +39,56 @@ impl EventSource for EnvironmentSensor {
 
             let mut am2320 = AM2320::new(device, delay);
             let mut previous_data: Option<Measurement> = None;
-            let mut missed_events: u64 = 0;
 
             loop {
-                let event = match read_am2320(&mut am2320) {
-                    Some(measurement) => {
-                        let unchanged = if let Some(previous_data) = &previous_data {
-                            if measurement_is_roughly_equal(previous_data, &measurement) {
-                                debug!("Skipping unchanged data");
-                                true
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        };
+                let measurement = read_am2320(&mut am2320);
 
-                        if unchanged {
-                            None
-                        } else {
-                            previous_data = Some(clone_measurement(&measurement));
-
-                            Some(Event::new_envirornment(
-                                measurement.temperature,
-                                measurement.humidity,
-                            ))
-                        }
+                let changed = if let Some(previous_data) = &previous_data {
+                    if measurement_is_roughly_equal(previous_data, &measurement) {
+                        debug!("Skipping unchanged data");
+                        false
+                    } else {
+                        true
                     }
-                    None => None,
+                } else {
+                    true
                 };
 
-                if let Some(event) = event {
-                    missed_events = 0;
+                if changed {
+                    previous_data = Some(clone_measurement(&measurement));
+
+                    let event =
+                        Event::new_envirornment(measurement.temperature, measurement.humidity);
                     if let Err(err) = sender.send(event) {
                         warn!("Failed to write sensor data to channel: {:?}", err);
                     }
-                } else if missed_events < 5 {
-                    missed_events += 1;
-                } else {
-                    panic!("Too many missed environment measurements. Shutting down.");
                 }
 
-                thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP * (missed_events + 1)));
+                thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP));
             }
         });
     }
 }
 
-fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Option<Measurement> {
+fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Measurement {
     let mut error_count: u8 = 0;
+    let mut backoff_count: u64 = 0;
     loop {
         match sensor.read() {
-            Ok(m) => return Some(Measurement::new(m.temperature, m.humidity)),
+            Ok(m) => return Measurement::new(m.temperature, m.humidity),
             Err(err) => {
                 error_count += 1;
                 if error_count > ENVIRONMENT_SENSOR_ERROR_LIMIT {
-                    error!("too many errors, failing: {:?}", err);
-                    return None;
+                    let sleep = ENVIRONMENT_SENSOR_SLEEP * (backoff_count + 1);
+                    error!("too many errors, backing off for {}s: {:?}", sleep, err);
+                    thread::sleep(time::Duration::from_secs(sleep));
+                    error_count = 0;
+                    if backoff_count < ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT {
+                        backoff_count += 1;
+                    } else {
+                        error!("environment sensor backoff limit reached; shutting down");
+                        std::process::exit(1);
+                    }
                 }
             }
         }
@@ -127,7 +120,10 @@ pub struct VibrationSensor {}
 impl EventSource for VibrationSensor {
     fn start(&self, sender: SyncSender<Event>) {
         let gpio = Gpio::new().unwrap();
-        let mut pin = gpio.get(VIBRATION_SENSOR_INTERRUPT_PIN).unwrap().into_input_pullup();
+        let mut pin = gpio
+            .get(VIBRATION_SENSOR_INTERRUPT_PIN)
+            .unwrap()
+            .into_input_pullup();
         pin.set_interrupt(Trigger::FallingEdge).unwrap();
         thread::spawn(move || {
             let mut last_event = time::Instant::now();
