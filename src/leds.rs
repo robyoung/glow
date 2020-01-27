@@ -1,8 +1,15 @@
-use std::{cell::Cell, cmp::Ordering, thread, time};
+use std::{cell::Cell, cmp::Ordering, thread, time, fmt};
 
 use blinkt::Blinkt;
 
 const NUM_PIXELS: u8 = 8;
+
+pub const COLOUR_BLUE: Colour = Colour(10, 10, 226);
+pub const COLOUR_ORANGE: Colour = Colour(120, 20, 0);
+pub const COLOUR_SALMON: Colour = Colour(160, 10, 1);
+pub const COLOUR_CORAL: Colour = Colour(255, 1, 1);
+pub const COLOUR_RED: Colour = Colour(255, 0, 100);
+
 
 pub trait LedBrightness {
     fn next(&mut self);
@@ -81,7 +88,7 @@ impl LedBrightness for DynamicLEDBrightness {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Copy)]
+#[derive(Clone, PartialEq, Eq, Copy)]
 pub struct Colour(pub u8, pub u8, pub u8);
 
 impl Colour {
@@ -99,6 +106,23 @@ impl Colour {
 
     pub fn blue() -> Colour {
         Colour(10, 10, 226)
+    }
+
+    pub fn name(&self) -> &'static str {
+        match *self {
+            COLOUR_BLUE => "blue",
+            COLOUR_ORANGE => "orange",
+            COLOUR_SALMON => "salmon",
+            COLOUR_CORAL => "coral",
+            COLOUR_RED => "red",
+            _ => "unnamed",
+        }
+    }
+}
+
+impl fmt::Debug for Colour {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Colour[{}]({}, {}, {})", self.name(), self.0, self.1, self.2)
     }
 }
 
@@ -158,14 +182,17 @@ pub struct ColourRange {
 }
 
 impl ColourRange {
-    pub fn new(buckets: Vec<ColourBucket>) -> Result<ColourRange, String> {
-        if buckets.is_empty() {
-            Err("not long enough".to_string())
+    pub fn new(lower: f32, step: f32, colours: &[Colour]) -> Result<ColourRange, String> {
+        if colours.is_empty() {
+            Err("must have at least one colour".to_string())
         } else {
-            let mut buckets_slice = buckets.into_boxed_slice();
-            buckets_slice.sort_unstable();
+            let buckets = colours
+                .iter()
+                .enumerate()
+                .map(|(i, &colour)| ColourBucket::new(colour.name(), lower + (i as f32) * step, colour))
+                .collect();
             Ok(ColourRange {
-                buckets: buckets_slice.into_vec(),
+                buckets: buckets,
                 num_pixels: NUM_PIXELS,
             })
         }
@@ -319,19 +346,15 @@ mod tests {
     #[test]
     fn cannot_create_colour_range_with_no_buckets() {
         // arrange
-        let colour_range = ColourRange::new(vec![]);
+        let colour_range = ColourRange::new(0.0, 0.0, &[]);
 
         // assert
         assert!(colour_range.is_err());
     }
 
     fn get_colour_range() -> ColourRange {
-        ColourRange::new(vec![
-            ColourBucket::new("blue", 14.0, Colour(10, 10, 226)),
-            ColourBucket::new("orange", 18.0, Colour(120, 20, 0)),
-            ColourBucket::new("salmon", 22.0, Colour(160, 10, 1)),
-            ColourBucket::new("coral", 26.0, Colour(255, 1, 1)),
-            ColourBucket::new("red", 30.0, Colour(255, 0, 100)),
+        ColourRange::new(14.0, 4.0, &[
+            COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED,
         ])
         .unwrap()
     }
@@ -340,12 +363,12 @@ mod tests {
     fn get_pixels_returns_all_pixels_as_colour_when_only_one_bucket() {
         // arrange
         let colour_range =
-            ColourRange::new(vec![ColourBucket::new("blue", 14.0, Colour(10, 10, 226))]).unwrap();
+            ColourRange::new(14.0, 4.0, &[COLOUR_BLUE]).unwrap();
 
         // assert
-        assert!(colour_range.get_pixels(12.0) == vec![Colour(10, 10, 226); 8]);
-        assert!(colour_range.get_pixels(14.0) == vec![Colour(10, 10, 226); 8]);
-        assert!(colour_range.get_pixels(18.0) == vec![Colour(10, 10, 226); 8]);
+        assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
+        assert!(colour_range.get_pixels(14.0) == vec![COLOUR_BLUE; 8]);
+        assert!(colour_range.get_pixels(18.0) == vec![COLOUR_BLUE; 8]);
     }
 
     #[test]
@@ -354,7 +377,7 @@ mod tests {
         let colour_range = get_colour_range();
 
         // assert
-        assert!(colour_range.get_pixels(12.0) == vec![Colour(10, 10, 226); 8]);
+        assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
     }
 
     #[test]
@@ -363,7 +386,7 @@ mod tests {
         let colour_range = get_colour_range();
 
         // assert
-        assert!(colour_range.get_pixels(31.0) == vec![Colour(255, 0, 100); 8]);
+        assert!(colour_range.get_pixels(31.0) == vec![COLOUR_RED; 8]);
     }
 
     #[test]
@@ -375,14 +398,27 @@ mod tests {
         assert_eq!(
             colour_range.get_pixels(16.0),
             vec![
-                Colour(10, 10, 226),
-                Colour(10, 10, 226),
-                Colour(10, 10, 226),
-                Colour(10, 10, 226),
-                Colour(120, 20, 0),
-                Colour(120, 20, 0),
-                Colour(120, 20, 0),
-                Colour(120, 20, 0)
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE
+            ]
+        );
+        assert_eq!(
+            colour_range.get_pixels(17.0),
+            vec![
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
             ]
         );
     }

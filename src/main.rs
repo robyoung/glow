@@ -7,19 +7,15 @@ extern crate log;
 use std::env;
 
 use glow::events::{run_loop, EventHandler, EventSource};
-use glow::leds::{BlinktLEDs, Colour, ColourBucket, ColourRange, DynamicLEDBrightness};
+use glow::leds::{BlinktLEDs, COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED, ColourRange, DynamicLEDBrightness};
 use glow::{EnvironmentSensor, VibrationSensor};
 use glow::{LEDHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
 
-    let colour_range = ColourRange::new(vec![
-        ColourBucket::new("blue", 14.0, Colour(10, 10, 226)),
-        ColourBucket::new("orange", 18.0, Colour(120, 20, 0)),
-        ColourBucket::new("salmon", 22.0, Colour(160, 10, 1)),
-        ColourBucket::new("coral", 26.0, Colour(255, 1, 1)),
-        ColourBucket::new("red", 30.0, Colour(255, 0, 100)),
+    let colour_range = ColourRange::new(14.0, 4.0, &[
+        COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED,
     ])?;
     let leds = BlinktLEDs::new();
 
