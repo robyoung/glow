@@ -15,10 +15,9 @@ impl Event {
         }
     }
 
-    pub fn new_envirornment(temperature: f64, humidity: f64) -> Event {
-        Self::new(Message::Environment(Measurement::new(
-            temperature,
-            humidity,
+    pub fn new_measurement(temperature: f64, humidity: f64) -> Event {
+        Self::new(Message::Environment(EnvironmentEvent::Measurement(
+            Measurement::new(temperature, humidity),
         )))
     }
 
@@ -33,11 +32,34 @@ impl Event {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Message {
-    Environment(Measurement),
-    TapEvent,
-    UpdateLEDs,
-    LEDParty,
+    Environment(EnvironmentEvent),
+    Tap(TapEvent),
+    TPLink(TPLinkEvent),
+    LED(LEDEvent),
     Stop,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum EnvironmentEvent {
+    Measurement(Measurement),
+    Failure,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TapEvent {
+    SingleTap,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum TPLinkEvent {
+    ListDevices,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum LEDEvent {
+    SetBrightness(u32),
+    Party,
+    Update,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -88,7 +110,7 @@ mod tests {
     #[test]
     fn new_event_has_recent_timestamp() {
         // act
-        let event = Event::new(Message::TapEvent);
+        let event = Event::new(Message::Tap(TapEvent::SingleTap));
 
         // assert
         let diff = Utc::now() - event.stamp();
@@ -98,12 +120,14 @@ mod tests {
     #[test]
     fn new_environment_event() {
         // act
-        let event = Event::new_envirornment(12.12, 13.13);
+        let event = Event::new_measurement(12.12, 13.13);
 
         // assert
         assert_eq!(
             *event.message(),
-            Message::Environment(Measurement::new(12.12, 13.13))
+            Message::Environment(EnvironmentEvent::Measurement(Measurement::new(
+                12.12, 13.13
+            )))
         );
     }
 
@@ -111,7 +135,9 @@ mod tests {
 
     impl EventSource for SendOneSource {
         fn start(&self, sender: SyncSender<Event>) {
-            sender.send(Event::new(Message::TapEvent)).unwrap();
+            sender
+                .send(Event::new(Message::Tap(TapEvent::SingleTap)))
+                .unwrap();
             sender.send(Event::new(Message::Stop)).unwrap();
         }
     }
@@ -139,7 +165,7 @@ mod tests {
         let events = receiver.iter().collect::<Vec<Event>>();
 
         assert_eq!(events.len(), 2);
-        assert_eq!(*events[0].message(), Message::TapEvent);
+        assert_eq!(*events[0].message(), Message::Tap(TapEvent::SingleTap));
         assert_eq!(*events[1].message(), Message::Stop);
     }
 }

@@ -20,7 +20,9 @@ use rppal::{
 
 use reqwest;
 
-use crate::events::{Event, EventHandler, EventSource, Measurement, Message};
+use crate::events::{
+    EnvironmentEvent, Event, EventHandler, EventSource, LEDEvent, Measurement, Message, TapEvent,
+};
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
 
 pub struct EnvironmentSensor {}
@@ -58,7 +60,7 @@ impl EventSource for EnvironmentSensor {
                     previous_data = Some(clone_measurement(&measurement));
 
                     let event =
-                        Event::new_envirornment(measurement.temperature, measurement.humidity);
+                        Event::new_measurement(measurement.temperature, measurement.humidity);
                     if let Err(err) = sender.send(event) {
                         warn!("Failed to write sensor data to channel: {:?}", err);
                     }
@@ -132,7 +134,9 @@ impl EventSource for VibrationSensor {
                     Ok(Some(_)) => {
                         if last_event.elapsed().as_millis() > VIBRATION_SENSOR_INTERRUPT_BOUNCE {
                             last_event = time::Instant::now();
-                            if let Err(err) = sender.send(Event::new(Message::TapEvent)) {
+                            if let Err(err) =
+                                sender.send(Event::new(Message::Tap(TapEvent::SingleTap)))
+                            {
                                 error!("Failed to write tap event to channel: {:?}", err);
                             }
                         }
@@ -168,10 +172,10 @@ impl PrintMeasurementHandler {
 impl EventHandler for PrintMeasurementHandler {
     fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
         match event.message() {
-            Message::Environment(measurement) => {
+            Message::Environment(EnvironmentEvent::Measurement(measurement)) => {
                 self.print(event, "data", measurement.temperature, measurement.humidity)
             }
-            Message::TapEvent => self.print(event, "tap", 0.0, 0.0),
+            Message::Tap(TapEvent::SingleTap) => self.print(event, "tap", 0.0, 0.0),
             _ => {}
         }
     }
@@ -208,21 +212,27 @@ impl EventHandler for LEDHandler {
     fn handle(&mut self, event: &Event, sender: &SyncSender<Event>) {
         let message = event.message();
         match message {
-            Message::Environment(measurement) => {
+            Message::Environment(EnvironmentEvent::Measurement(measurement)) => {
                 self.colours = self.colour_range.get_pixels(measurement.temperature as f32);
-                sender.send(Event::new(Message::UpdateLEDs)).unwrap();
+                sender
+                    .send(Event::new(Message::LED(LEDEvent::Update)))
+                    .unwrap();
             }
-            Message::TapEvent => {
+            Message::Tap(TapEvent::SingleTap) => {
                 self.brightness.next();
-                sender.send(Event::new(Message::LEDParty)).unwrap();
-                sender.send(Event::new(Message::UpdateLEDs)).unwrap();
+                sender
+                    .send(Event::new(Message::LED(LEDEvent::Party)))
+                    .unwrap();
+                sender
+                    .send(Event::new(Message::LED(LEDEvent::Update)))
+                    .unwrap();
             }
-            Message::LEDParty => {
+            Message::LED(LEDEvent::Party) => {
                 if let Err(err) = self.leds.party() {
                     error!("party error: {}", err);
                 }
             }
-            Message::UpdateLEDs => {
+            Message::LED(LEDEvent::Update) => {
                 if let Err(err) = self.leds.show(&self.colours, self.brightness.value()) {
                     error!("show error: {}", err);
                 }
@@ -291,7 +301,7 @@ impl WebHookHandler {
 
 impl EventHandler for WebHookHandler {
     fn handle(&mut self, event: &Event, _sender: &SyncSender<Event>) {
-        if let Message::Environment(measurement) = event.message() {
+        if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
             if self.should_send(*measurement) {
                 let payload = measurement_as_map(event.stamp(), measurement);
                 debug!("IFTTT payload {:?}", payload);
