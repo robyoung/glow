@@ -75,6 +75,11 @@ impl Measurement {
             humidity,
         }
     }
+
+    pub fn roughly_equal(&self, other: &Measurement) -> bool {
+        (self.temperature - other.temperature).abs() < 0.001
+            && (self.humidity - other.humidity).abs() < 0.001
+    }
 }
 
 pub trait EventHandler {

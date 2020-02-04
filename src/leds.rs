@@ -1,4 +1,4 @@
-use std::{cell::Cell, cmp::Ordering, thread, time, fmt};
+use std::{cell::Cell, cmp::Ordering, f32, fmt, thread, time};
 
 use blinkt::Blinkt;
 
@@ -9,7 +9,6 @@ pub const COLOUR_ORANGE: Colour = Colour(120, 20, 0);
 pub const COLOUR_SALMON: Colour = Colour(160, 10, 1);
 pub const COLOUR_CORAL: Colour = Colour(255, 1, 1);
 pub const COLOUR_RED: Colour = Colour(255, 0, 100);
-
 
 pub trait LedBrightness {
     fn next(&mut self);
@@ -62,7 +61,10 @@ impl DynamicLEDBrightness {
     fn get_value(&self) -> Option<f32> {
         let resp = self.client.get(self.url.as_str()).call();
         if resp.error() {
-            error!("Failed to get new LED brightness value: {:?}", resp.status());
+            error!(
+                "Failed to get new LED brightness value: {:?}",
+                resp.status()
+            );
             return None;
         }
 
@@ -75,7 +77,7 @@ impl DynamicLEDBrightness {
         } else {
             error!("Failed to read LED brightness response");
         }
-        return None;
+        None
     }
 }
 
@@ -114,8 +116,8 @@ impl Colour {
         Colour(10, 10, 226)
     }
 
-    pub fn name(&self) -> &'static str {
-        match *self {
+    pub fn name(self) -> &'static str {
+        match self {
             COLOUR_BLUE => "blue",
             COLOUR_ORANGE => "orange",
             COLOUR_SALMON => "salmon",
@@ -128,7 +130,14 @@ impl Colour {
 
 impl fmt::Debug for Colour {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Colour[{}]({}, {}, {})", self.name(), self.0, self.1, self.2)
+        write!(
+            f,
+            "Colour[{}]({}, {}, {})",
+            self.name(),
+            self.0,
+            self.1,
+            self.2
+        )
     }
 }
 
@@ -195,10 +204,12 @@ impl ColourRange {
             let buckets = colours
                 .iter()
                 .enumerate()
-                .map(|(i, &colour)| ColourBucket::new(colour.name(), lower + (i as f32) * step, colour))
+                .map(|(i, &colour)| {
+                    ColourBucket::new(colour.name(), lower + (i as f32) * step, colour)
+                })
                 .collect();
             Ok(ColourRange {
-                buckets: buckets,
+                buckets,
                 num_pixels: NUM_PIXELS,
             })
         }
@@ -268,16 +279,15 @@ impl BlinktLEDs {
         }
     }
 
+    #[allow(clippy::if_same_then_else)]
     fn should_update(&mut self, colours: &[Colour], brightness: f32) -> bool {
         let result = match &self.current {
             None => true,
             Some(current) => {
-                if current.1 != brightness {
-                    true
-                } else if colours.iter().zip(current.0.iter()).any(|(&a, &b)| a != b) {
+                if (current.1 - brightness).abs() < f32::EPSILON {
                     true
                 } else {
-                    false
+                    colours.iter().zip(current.0.iter()).any(|(&a, &b)| a != b)
                 }
             }
         };
@@ -300,12 +310,13 @@ impl BlinktLEDs {
 /// 0.02  *  **  *
 /// 0.03  * ** ***
 /// 0.04  ********
+#[allow(clippy::if_same_then_else)]
 pub(self) fn get_blinkt_brightness(pixel: usize, brightness: f32) -> f32 {
-    if [1, 2, 3, 4, 5, 6].contains(&pixel) && brightness == 0.01 {
+    if [1, 2, 3, 4, 5, 6].contains(&pixel) && (brightness - 0.01).abs() < f32::EPSILON {
         0.0
-    } else if [1, 2, 5, 6].contains(&pixel) && brightness == 0.02 {
+    } else if [1, 2, 5, 6].contains(&pixel) && (brightness - 0.02).abs() < f32::EPSILON {
         0.0
-    } else if [1, 4].contains(&pixel) && brightness == 0.03 {
+    } else if [1, 4].contains(&pixel) && (brightness - 0.03).abs() < f32::EPSILON {
         0.0
     } else if brightness < 0.01 {
         0.0
@@ -359,17 +370,24 @@ mod tests {
     }
 
     fn get_colour_range() -> ColourRange {
-        ColourRange::new(14.0, 4.0, &[
-            COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED,
-        ])
+        ColourRange::new(
+            14.0,
+            4.0,
+            &[
+                COLOUR_BLUE,
+                COLOUR_ORANGE,
+                COLOUR_SALMON,
+                COLOUR_CORAL,
+                COLOUR_RED,
+            ],
+        )
         .unwrap()
     }
 
     #[test]
     fn get_pixels_returns_all_pixels_as_colour_when_only_one_bucket() {
         // arrange
-        let colour_range =
-            ColourRange::new(14.0, 4.0, &[COLOUR_BLUE]).unwrap();
+        let colour_range = ColourRange::new(14.0, 4.0, &[COLOUR_BLUE]).unwrap();
 
         // assert
         assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
@@ -431,7 +449,7 @@ mod tests {
 
     fn test_blinkt_brightness_helper(brightness: f32, expected: [f32; 8]) {
         let actual = [brightness; 8]
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(pixel, brightness)| get_blinkt_brightness(pixel, *brightness))
             .collect::<Vec<f32>>();

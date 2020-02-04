@@ -44,24 +44,21 @@ impl EventHandler for EnvironmentSensor {
                 let measurement = read_am2320(&mut am2320);
 
                 let changed = if let Some(previous_data) = &previous_data {
-                    if measurement_is_roughly_equal(previous_data, &measurement) {
-                        debug!("Skipping unchanged data");
-                        false
-                    } else {
-                        true
-                    }
+                    !previous_data.roughly_equal(&measurement)
                 } else {
                     true
                 };
 
                 if changed {
-                    previous_data = Some(clone_measurement(&measurement));
+                    previous_data = Some(measurement);
 
                     let event =
                         Event::new_measurement(measurement.temperature, measurement.humidity);
                     if let Err(err) = sender.send(event) {
                         warn!("Failed to write sensor data to channel: {:?}", err);
                     }
+                } else {
+                    debug!("Skipping unchanged data");
                 }
 
                 thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP));
@@ -92,18 +89,6 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Measurement {
                 }
             }
         }
-    }
-}
-
-fn measurement_is_roughly_equal(previous_data: &Measurement, new_data: &Measurement) -> bool {
-    (previous_data.temperature - new_data.temperature).abs() < 0.001
-        && (previous_data.humidity - new_data.humidity).abs() < 0.001
-}
-
-fn clone_measurement(measurement: &Measurement) -> Measurement {
-    Measurement {
-        temperature: measurement.temperature,
-        humidity: measurement.humidity,
     }
 }
 
@@ -253,6 +238,7 @@ impl WebHookHandler {
         }
     }
 
+    #[allow(clippy::if_same_then_else)]
     fn should_send(&mut self, measurement: Measurement) -> bool {
         let should_send = if self.last_value.is_none() {
             // we have not sent a value yet
@@ -265,11 +251,15 @@ impl WebHookHandler {
             false
         } else {
             // more than half of the previous values are different to the last sent one
+            const TEMPERATURE_EPSILON: f64 = 0.001;
             self.previous_values
                 .iter()
                 .filter(|value| match value {
                     None => false,
-                    Some(value) => self.last_value.unwrap().temperature != (*value).temperature,
+                    Some(value) => {
+                        (self.last_value.unwrap().temperature - (*value).temperature).abs()
+                            < TEMPERATURE_EPSILON
+                    }
                 })
                 .count() as f64
                 / WEB_HOOK_PREVIOUS_VALUES as f64
@@ -293,13 +283,11 @@ impl EventHandler for WebHookHandler {
     fn handle(&mut self, event: &Event, _sender: &SyncSender<Event>) {
         if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
             if self.should_send(*measurement) {
-                let resp = self.client
-                    .post(self.url.as_str())
-                    .send_json(json!({
-                        "value1": event.stamp().to_rfc3339(),
-                        "value2": measurement.temperature.to_string(),
-                        "value3": measurement.humidity.to_string(),
-                    }));
+                let resp = self.client.post(self.url.as_str()).send_json(json!({
+                    "value1": event.stamp().to_rfc3339(),
+                    "value2": measurement.temperature.to_string(),
+                    "value3": measurement.humidity.to_string(),
+                }));
                 if resp.error() {
                     error!("Failed to send to IFTT");
                 }
@@ -325,7 +313,7 @@ mod tests {
         };
 
         // assert
-        assert!(measurement_is_roughly_equal(&previous_data, &new_data));
+        assert!((&previous_data).roughly_equal(&new_data));
     }
 
     #[test]
@@ -341,6 +329,6 @@ mod tests {
         };
 
         // assert
-        assert!(!measurement_is_roughly_equal(&previous_data, &new_data));
+        assert!(!(&previous_data).roughly_equal(&new_data));
     }
 }

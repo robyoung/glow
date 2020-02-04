@@ -7,25 +7,32 @@ extern crate log;
 use std::env;
 
 use glow::events::{run_loop, EventHandler};
-use glow::leds::{BlinktLEDs, COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED, ColourRange, DynamicLEDBrightness};
+use glow::leds::{
+    BlinktLEDs, ColourRange, DynamicLEDBrightness, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE,
+    COLOUR_RED, COLOUR_SALMON,
+};
 use glow::{EnvironmentSensor, VibrationSensor};
 use glow::{LEDHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
 
-    let colour_range = ColourRange::new(14.0, 4.0, &[
-        COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED,
-    ])?;
+    let colour_range = ColourRange::new(
+        14.0,
+        4.0,
+        &[
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+            COLOUR_SALMON,
+            COLOUR_CORAL,
+            COLOUR_RED,
+        ],
+    )?;
     let leds = BlinktLEDs::new();
     let brightness = DynamicLEDBrightness::new(String::from(
         "https://raw.githubusercontent.com/robyoung/data/master/glow-brightness",
     ));
-    let led_handler = LEDHandler::new_with_brightness(
-        leds,
-        colour_range,
-        brightness,
-    );
+    let led_handler = LEDHandler::new_with_brightness(leds, colour_range, brightness);
 
     let mut handlers: Vec<Box<dyn EventHandler>> = vec![
         Box::new(EnvironmentSensor {}),
