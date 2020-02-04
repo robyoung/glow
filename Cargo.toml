@@ -6,6 +6,7 @@ edition = "2018"
 
 [profile.release]
 opt-level = 'z'
+lto = true
 
 [dependencies]
 embedded-hal = "0.2"
