@@ -21,7 +21,7 @@ use rppal::{
 use reqwest;
 
 use crate::events::{
-    EnvironmentEvent, Event, EventHandler, EventSource, LEDEvent, Measurement, Message, TapEvent,
+    EnvironmentEvent, Event, EventHandler, LEDEvent, Measurement, Message, TapEvent,
 };
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
 
@@ -33,7 +33,7 @@ const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 3;
 const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
 const ENVIRONMENT_SENSOR_SLEEP: u64 = 5;
 
-impl EventSource for EnvironmentSensor {
+impl EventHandler for EnvironmentSensor {
     fn start(&self, sender: SyncSender<Event>) {
         thread::spawn(move || {
             let device = I2c::new().expect("could not initialise I2C");
@@ -119,7 +119,7 @@ fn measurement_as_map(stamp: DateTime<Utc>, measurement: &Measurement) -> HashMa
 
 pub struct VibrationSensor {}
 
-impl EventSource for VibrationSensor {
+impl EventHandler for VibrationSensor {
     fn start(&self, sender: SyncSender<Event>) {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio

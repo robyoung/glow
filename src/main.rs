@@ -6,7 +6,7 @@ extern crate log;
 
 use std::env;
 
-use glow::events::{run_loop, EventHandler, EventSource};
+use glow::events::{run_loop, EventHandler};
 use glow::leds::{BlinktLEDs, COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED, ColourRange, DynamicLEDBrightness};
 use glow::{EnvironmentSensor, VibrationSensor};
 use glow::{LEDHandler, WebHookHandler};
@@ -18,17 +18,20 @@ fn main() -> Result<(), String> {
         COLOUR_BLUE, COLOUR_ORANGE, COLOUR_SALMON, COLOUR_CORAL, COLOUR_RED,
     ])?;
     let leds = BlinktLEDs::new();
-
-    let sources: Vec<Box<dyn EventSource>> =
-        vec![Box::new(EnvironmentSensor {}), Box::new(VibrationSensor {})];
     let brightness = DynamicLEDBrightness::new(String::from(
         "https://raw.githubusercontent.com/robyoung/data/master/glow-brightness",
     ));
-    let mut handlers: Vec<Box<dyn EventHandler>> = vec![Box::new(LEDHandler::new_with_brightness(
+    let led_handler = LEDHandler::new_with_brightness(
         leds,
         colour_range,
         brightness,
-    ))];
+    );
+
+    let mut handlers: Vec<Box<dyn EventHandler>> = vec![
+        Box::new(EnvironmentSensor {}),
+        Box::new(VibrationSensor {}),
+        Box::new(led_handler),
+    ];
 
     if let Ok(ifttt_webhook_key) = env::var("IFTTT_WEBHOOK_KEY") {
         debug!("Adding IFTTT web hook handler");
@@ -40,6 +43,6 @@ fn main() -> Result<(), String> {
         handlers.push(Box::new(WebHookHandler::new(webhook_url)));
     }
 
-    run_loop(sources, handlers);
+    run_loop(handlers);
     Ok(())
 }
