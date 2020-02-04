@@ -41,7 +41,7 @@ impl LedBrightness for StaticLedBrightness {
 }
 
 pub struct DynamicLEDBrightness {
-    client: reqwest::Client,
+    client: ureq::Agent,
     url: String,
     last_received: time::Instant,
     current_value: Cell<Option<f32>>,
@@ -52,11 +52,30 @@ const LED_BRIGHTNESS_UPDATE_TIME: u64 = 2;
 impl DynamicLEDBrightness {
     pub fn new(url: String) -> DynamicLEDBrightness {
         DynamicLEDBrightness {
-            client: reqwest::Client::new(),
+            client: ureq::agent(),
             url,
             last_received: time::Instant::now() - time::Duration::from_secs(100_000),
             current_value: Cell::new(None),
         }
+    }
+
+    fn get_value(&self) -> Option<f32> {
+        let resp = self.client.get(self.url.as_str()).call();
+        if resp.error() {
+            error!("Failed to get new LED brightness value: {:?}", resp.status());
+            return None;
+        }
+
+        if let Ok(data) = resp.into_string() {
+            if let Ok(value) = data.trim().parse::<f32>() {
+                return Some(value);
+            } else {
+                error!("Failed to parse LED brightness value: {}", data);
+            }
+        } else {
+            error!("Failed to read LED brightness response");
+        }
+        return None;
     }
 }
 
@@ -67,21 +86,8 @@ impl LedBrightness for DynamicLEDBrightness {
             || self.last_received.elapsed() > time::Duration::from_secs(LED_BRIGHTNESS_UPDATE_TIME)
         {
             debug!("Updating LED brightness");
-            match self.client.get(self.url.as_str()).send() {
-                Ok(mut resp) => {
-                    if let Ok(data) = resp.text() {
-                        if let Ok(value) = data.trim().parse::<f32>() {
-                            self.current_value.set(Some(value));
-                        } else {
-                            error!("Failed to parse LED brightness value: {}", data);
-                        }
-                    } else {
-                        error!("Failed to read LED brightness response");
-                    }
-                }
-                Err(err) => {
-                    error!("Failed to get new LED brightness value: {}", err);
-                }
+            if let Some(value) = self.get_value() {
+                self.current_value.set(Some(value));
             }
         }
         self.current_value.get().unwrap()

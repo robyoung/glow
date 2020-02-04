@@ -15,8 +15,4 @@ am2320 = "0.1.1"
 rppal = { version = "0.11.3", features = ["hal"] }
 log = "0.4"
 env_logger = "0.6"
-
-[dependencies.reqwest]
-version = "0.9"
-default-features = false
-features = ["rustls-tls"]
+ureq = { version = "0.11.3", features = ["json"] }

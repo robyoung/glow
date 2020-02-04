@@ -3,22 +3,20 @@ extern crate blinkt;
 extern crate chrono;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate ureq;
 
 pub mod events;
 pub mod leds;
 
-use std::{collections::HashMap, sync::mpsc::SyncSender, thread, time};
+use std::{sync::mpsc::SyncSender, thread, time};
 
 use am2320::AM2320;
-
-use chrono::{offset::Utc, DateTime};
 use rppal::{
     gpio::{Gpio, Trigger},
     hal::Delay,
     i2c::I2c,
 };
-
-use reqwest;
 
 use crate::events::{
     EnvironmentEvent, Event, EventHandler, LEDEvent, Measurement, Message, TapEvent,
@@ -107,14 +105,6 @@ fn clone_measurement(measurement: &Measurement) -> Measurement {
         temperature: measurement.temperature,
         humidity: measurement.humidity,
     }
-}
-
-fn measurement_as_map(stamp: DateTime<Utc>, measurement: &Measurement) -> HashMap<&str, String> {
-    let mut result = HashMap::new();
-    result.insert("value1", stamp.to_rfc3339());
-    result.insert("value2", format!("{}", measurement.temperature));
-    result.insert("value3", format!("{}", measurement.humidity));
-    result
 }
 
 pub struct VibrationSensor {}
@@ -245,7 +235,7 @@ impl EventHandler for LEDHandler {
 const WEB_HOOK_PREVIOUS_VALUES: usize = 40;
 
 pub struct WebHookHandler {
-    client: reqwest::Client,
+    client: ureq::Agent,
     url: String,
     last_send: time::Instant,
     last_value: Option<Measurement>,
@@ -255,7 +245,7 @@ pub struct WebHookHandler {
 impl WebHookHandler {
     pub fn new(url: String) -> WebHookHandler {
         WebHookHandler {
-            client: reqwest::Client::new(),
+            client: ureq::agent(),
             url,
             last_send: time::Instant::now() - time::Duration::from_secs(100_000),
             last_value: None,
@@ -303,18 +293,15 @@ impl EventHandler for WebHookHandler {
     fn handle(&mut self, event: &Event, _sender: &SyncSender<Event>) {
         if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
             if self.should_send(*measurement) {
-                let payload = measurement_as_map(event.stamp(), measurement);
-                debug!("IFTTT payload {:?}", payload);
-                match self.client.post(self.url.as_str()).json(&payload).build() {
-                    Ok(request) => {
-                        debug!("IFTTT request {:?}", request);
-                        if let Err(err) = self.client.execute(request) {
-                            error!("Failed to send to IFTTT: {:?}", err);
-                        }
-                    }
-                    Err(err) => {
-                        error!("Failed to build IFTTT request: {:?}", err);
-                    }
+                let resp = self.client
+                    .post(self.url.as_str())
+                    .send_json(json!({
+                        "value1": event.stamp().to_rfc3339(),
+                        "value2": measurement.temperature.to_string(),
+                        "value3": measurement.humidity.to_string(),
+                    }));
+                if resp.error() {
+                    error!("Failed to send to IFTT");
                 }
             }
         }
