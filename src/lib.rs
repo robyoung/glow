@@ -321,7 +321,10 @@ impl EventHandler for WebHookHandler {
                     "value3": measurement.humidity.to_string(),
                 });
                 info!("IFTT payload {:?}", payload);
-                let resp = self.client.post(self.url.as_str()).send_json(payload);
+                let resp = self.client
+                    .post(self.url.as_str())
+                    .set("Content-Type", "application/json")
+                    .send_json(payload);
                 if resp.error() {
                     error!("Failed to send to IFTT");
                 }
