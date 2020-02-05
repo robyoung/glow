@@ -217,6 +217,38 @@ impl EventHandler for LEDHandler {
     }
 }
 
+pub struct WebEventHandler {
+    client: ureq::Agent,
+    url: String,
+    token: String,
+    events: Vec<Event>,
+}
+
+impl WebEventHandler {
+    pub fn new(url: String, token: String) -> WebEventHandler {
+        WebEventHandler {
+            client: ureq::agent(),
+            url,
+            token,
+            events: Vec::new(),
+        }
+    }
+}
+
+impl EventHandler for WebEventHandler {
+    fn start(&self, sender: SyncSender<Event>) {
+        thread::spawn(move || {
+            loop {
+                // TODO: sensible value here
+                thread::sleep(time::Duration::from_secs(1));
+            }
+        });
+    }
+
+    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
+    }
+}
+
 const WEB_HOOK_PREVIOUS_VALUES: usize = 40;
 
 pub struct WebHookHandler {
@@ -283,11 +315,13 @@ impl EventHandler for WebHookHandler {
     fn handle(&mut self, event: &Event, _sender: &SyncSender<Event>) {
         if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
             if self.should_send(*measurement) {
-                let resp = self.client.post(self.url.as_str()).send_json(json!({
+                let payload = json!({
                     "value1": event.stamp().to_rfc3339(),
                     "value2": measurement.temperature.to_string(),
                     "value3": measurement.humidity.to_string(),
-                }));
+                });
+                info!("IFTT payload {:?}", payload);
+                let resp = self.client.post(self.url.as_str()).send_json(payload);
                 if resp.error() {
                     error!("Failed to send to IFTT");
                 }
