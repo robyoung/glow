@@ -1,7 +1,9 @@
-use chrono::{offset::Utc, DateTime};
 use std::sync::mpsc::{sync_channel, SyncSender};
 
-#[derive(Debug, Clone)]
+use chrono::{offset::Utc, DateTime};
+use serde::{Serialize, Deserialize};
+
+#[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
     stamp: DateTime<Utc>,
     message: Message,
@@ -30,7 +32,7 @@ impl Event {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum Message {
     Environment(EnvironmentEvent),
     Tap(TapEvent),
@@ -39,30 +41,30 @@ pub enum Message {
     Stop,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum EnvironmentEvent {
     Measurement(Measurement),
     Failure,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TapEvent {
     SingleTap,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TPLinkEvent {
     ListDevices,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum LEDEvent {
     SetBrightness(u32),
     Party,
     Update,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub struct Measurement {
     pub temperature: f64,
     pub humidity: f64,
@@ -108,6 +110,7 @@ pub fn run_loop(mut handlers: Vec<Box<dyn EventHandler>>) {
 mod tests {
     use super::*;
     use std::time::Duration;
+    use serde_json;
 
     #[test]
     fn new_event_has_recent_timestamp() {
@@ -169,5 +172,29 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(*events[0].message(), Message::Tap(TapEvent::SingleTap));
         assert_eq!(*events[1].message(), Message::Stop);
+    }
+
+    #[test]
+    fn serialize_a_message() {
+        // arrange
+        let message = Message::Environment(EnvironmentEvent::Measurement(Measurement::new(12.3, 43.1)));
+
+        // act
+        let message_str = serde_json::to_string(&message);
+
+        // assert
+        assert_eq!(message_str.unwrap(), r#"{"Environment":{"Measurement":{"temperature":12.3,"humidity":43.1}}}"#);
+    }
+     #[test]
+    fn serialize_deserialize_an_event() {
+        // arrange
+        let event = Event::new_measurement(12.3, 43.1);
+
+        // act
+        let serialized = serde_json::to_string(&event).unwrap();
+        let deserialized: Event = serde_json::from_str(&serialized).unwrap();
+
+        // assert
+        assert_eq!(event, deserialized);
     }
 }
