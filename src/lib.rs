@@ -50,6 +50,10 @@ impl EventHandler for EnvironmentSensor {
                 };
 
                 if changed {
+                    debug!(
+                        "Sending changed data: {:?} {:?}",
+                        measurement, previous_data
+                    );
                     previous_data = Some(measurement);
 
                     let event =
@@ -58,7 +62,10 @@ impl EventHandler for EnvironmentSensor {
                         warn!("Failed to write sensor data to channel: {:?}", err);
                     }
                 } else {
-                    debug!("Skipping unchanged data");
+                    debug!(
+                        "Skipping unchanged data: {:?} {:?}",
+                        measurement, previous_data
+                    );
                 }
 
                 thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP));
@@ -245,11 +252,10 @@ impl EventHandler for WebEventHandler {
         });
     }
 
-    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
-    }
+    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {}
 }
 
-const WEB_HOOK_PREVIOUS_VALUES: usize = 40;
+const WEB_HOOK_PREVIOUS_VALUES: usize = 20;
 
 pub struct WebHookHandler {
     client: ureq::Agent,
@@ -286,11 +292,11 @@ impl WebHookHandler {
             const TEMPERATURE_EPSILON: f64 = 0.001;
             self.previous_values
                 .iter()
-                .filter(|value| match value {
+                .filter(|&value| match value {
                     None => false,
                     Some(value) => {
-                        (self.last_value.unwrap().temperature - (*value).temperature).abs()
-                            < TEMPERATURE_EPSILON
+                        (self.last_value.unwrap().temperature - value.temperature).abs()
+                            > TEMPERATURE_EPSILON
                     }
                 })
                 .count() as f64
@@ -321,7 +327,8 @@ impl EventHandler for WebHookHandler {
                     "value3": measurement.humidity.to_string(),
                 });
                 info!("IFTT payload {:?}", payload);
-                let resp = self.client
+                let resp = self
+                    .client
                     .post(self.url.as_str())
                     .set("Content-Type", "application/json")
                     .send_json(payload);
