@@ -150,11 +150,21 @@ dependencies = [
  "chrono",
  "embedded-hal",
  "env_logger",
+ "glow_events",
  "log",
  "rppal 0.11.3",
  "serde",
  "serde_json",
  "ureq",
+]
+
+[[package]]
+name = "glow_events"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

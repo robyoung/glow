@@ -5,6 +5,7 @@ extern crate chrono;
 extern crate log;
 #[macro_use]
 extern crate ureq;
+extern crate glow_events;
 
 pub mod events;
 pub mod leds;
@@ -22,9 +23,9 @@ use rppal::{
     i2c::I2c,
 };
 
-use crate::events::{
-    EnvironmentEvent, Event, EventHandler, LEDEvent, Measurement, Message, TapEvent,
-};
+use glow_events::{Event, Measurement, LEDEvent, Message, EnvironmentEvent, TapEvent};
+
+use crate::events::EventHandler;
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
 
 pub struct EnvironmentSensor {}
