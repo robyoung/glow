@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "glow",
+  "glow-device",
   "glow_events",
 ]
 

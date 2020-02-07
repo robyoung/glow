@@ -1,18 +1,18 @@
 extern crate env_logger;
-extern crate glow;
+extern crate glow_device;
 extern crate rppal;
 #[macro_use]
 extern crate log;
 
 use std::env;
 
-use glow::events::{run_loop, EventHandler};
-use glow::leds::{
+use glow_device::events::{run_loop, EventHandler};
+use glow_device::leds::{
     BlinktLEDs, ColourRange, DynamicLEDBrightness, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE,
     COLOUR_RED, COLOUR_SALMON,
 };
-use glow::{EnvironmentSensor, VibrationSensor};
-use glow::{LEDHandler, WebHookHandler};
+use glow_device::{EnvironmentSensor, VibrationSensor};
+use glow_device::{LEDHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();

@@ -142,7 +142,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "glow"
+name = "glow-device"
 version = "0.1.0"
 dependencies = [
  "am2320",

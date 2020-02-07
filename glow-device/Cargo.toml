@@ -1,5 +1,5 @@
 [package]
-name = "glow"
+name = "glow-device"
 version = "0.1.0"
 authors = ["Rob Young <rob@robyoung.digital>"]
 edition = "2018"
