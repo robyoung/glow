@@ -9,7 +9,11 @@ extern crate ureq;
 pub mod events;
 pub mod leds;
 
-use std::{sync::mpsc::SyncSender, thread, time};
+use std::{
+    sync::mpsc::{sync_channel, Receiver, SyncSender},
+    thread,
+    time,
+};
 
 use am2320::AM2320;
 use rppal::{
@@ -32,7 +36,7 @@ const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
 const ENVIRONMENT_SENSOR_SLEEP: u64 = 5;
 
 impl EventHandler for EnvironmentSensor {
-    fn start(&self, sender: SyncSender<Event>) {
+    fn start(&mut self, sender: SyncSender<Event>) {
         thread::spawn(move || {
             let device = I2c::new().expect("could not initialise I2C");
             let delay = Delay::new();
@@ -102,7 +106,7 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Measurement {
 pub struct VibrationSensor {}
 
 impl EventHandler for VibrationSensor {
-    fn start(&self, sender: SyncSender<Event>) {
+    fn start(&mut self, sender: SyncSender<Event>) {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio
             .get(VIBRATION_SENSOR_INTERRUPT_PIN)
@@ -225,34 +229,78 @@ impl EventHandler for LEDHandler {
 }
 
 pub struct WebEventHandler {
-    client: ureq::Agent,
     url: String,
     token: String,
-    events: Vec<Event>,
+    sender: SyncSender<Event>,
+    receiver: Option<Receiver<Event>>,
 }
 
 impl WebEventHandler {
     pub fn new(url: String, token: String) -> WebEventHandler {
+        let (sender, receiver) = sync_channel(20);
         WebEventHandler {
-            client: ureq::agent(),
             url,
             token,
-            events: Vec::new(),
+            sender,
+            receiver: Some(receiver),
         }
     }
 }
 
 impl EventHandler for WebEventHandler {
-    fn start(&self, sender: SyncSender<Event>) {
+    fn start(&mut self, sender: SyncSender<Event>) {
+        let url = self.url.clone();
+        let token = self.token.clone();
+        // TODO: think of a better way of doing this, maybe send out on sender
+        let receiver = self.receiver.take().unwrap();
+
         thread::spawn(move || {
+            let client = ureq::agent();
             loop {
+                // read all events off the queue
+                let events = receiver
+                    .try_iter()
+                    .collect::<Vec<Event>>();
+
+                // make request to server
+                let resp = client
+                    .post(url.as_str())
+                    .set("Content-Type", "application/json")
+                    .auth_kind("Bearer", &token)
+                    .send_json(serde_json::to_value(&events).unwrap());
+
+                // send received events on bus
+                if resp.ok() {
+                    if let Ok(data) = resp.into_json() {
+                        if let Ok(events) = serde_json::from_value::<Vec<Event>>(data) {
+                            for event in events {
+                                if let Err(err) = sender.send(event) {
+                                    error!("failed to send remote error to bus {:?}", err);
+                                }
+                            }
+                        } else {
+                            error!("received badly formatted json");
+                        }
+                    } else {
+                        error!("received invalid json");
+                    }
+                } else {
+                    error!("Failed to send events");
+                }
+
+
+                // sleep for poll interval
                 // TODO: sensible value here
                 thread::sleep(time::Duration::from_secs(1));
             }
         });
     }
 
-    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {}
+    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
+        if let Err(err) = self.sender.send(event.clone()) {
+            error!("failed to send event to remote worker: {:?}", err);
+        }
+    }
 }
 
 const WEB_HOOK_PREVIOUS_VALUES: usize = 20;

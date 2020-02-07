@@ -85,14 +85,14 @@ impl Measurement {
 }
 
 pub trait EventHandler {
-    fn start(&self, _sender: SyncSender<Event>) {}
+    fn start(&mut self, _sender: SyncSender<Event>) {}
     fn handle(&mut self, _event: &Event, _sender: &SyncSender<Event>) {}
 }
 
 pub fn run_loop(mut handlers: Vec<Box<dyn EventHandler>>) {
     let (sender, receiver) = sync_channel(20);
 
-    for handler in handlers.iter() {
+    for handler in handlers.iter_mut() {
         handler.start(sender.clone());
     }
 
@@ -139,7 +139,7 @@ mod tests {
     struct SendOneSource {}
 
     impl EventHandler for SendOneSource {
-        fn start(&self, sender: SyncSender<Event>) {
+        fn start(&mut self, sender: SyncSender<Event>) {
             sender
                 .send(Event::new(Message::Tap(TapEvent::SingleTap)))
                 .unwrap();
