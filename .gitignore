@@ -2,3 +2,4 @@
 **/*.rs.bk
 /.envrc
 /NOTES.md
+/glow-web/events.db
