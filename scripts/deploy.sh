@@ -4,7 +4,7 @@ set -e
 
 TRIPPLE="arm-unknown-linux-musleabihf"
 TARGET_DIR="./target/${TRIPPLE}/release"
-TARGET="${TARGET_DIR}/glow"
+TARGET="${TARGET_DIR}/glow-device"
 
 fail() {
   >&2 echo $1
