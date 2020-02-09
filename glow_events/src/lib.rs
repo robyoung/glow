@@ -123,6 +123,18 @@ mod tests {
         assert_eq!(message_str.unwrap(), r#"{"Environment":{"Measurement":{"temperature":12.3,"humidity":43.1}}}"#);
     }
 
+    #[test]
+    fn serialize_a_stop_message() {
+        // arrange
+        let message = Message::Stop;
+
+        // act
+        let message_str = serde_json::to_string(&message);
+
+        // assert
+        assert_eq!(message_str.unwrap(), r#""Stop""#);
+    }
+
      #[test]
     fn serialize_deserialize_an_event() {
         // arrange
