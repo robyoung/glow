@@ -27,7 +27,7 @@ pub fn run_loop(mut handlers: Vec<Box<dyn EventHandler>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glow_events::{TapEvent};
+    use glow_events::TapEvent;
 
     struct SendOneSource {}
 

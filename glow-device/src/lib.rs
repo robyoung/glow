@@ -12,8 +12,7 @@ pub mod leds;
 
 use std::{
     sync::mpsc::{sync_channel, Receiver, SyncSender},
-    thread,
-    time,
+    thread, time,
 };
 
 use am2320::AM2320;
@@ -23,7 +22,7 @@ use rppal::{
     i2c::I2c,
 };
 
-use glow_events::{Event, Measurement, LEDEvent, Message, EnvironmentEvent, TapEvent};
+use glow_events::{EnvironmentEvent, Event, LEDEvent, Measurement, Message, TapEvent};
 
 use crate::events::EventHandler;
 use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
@@ -259,9 +258,7 @@ impl EventHandler for WebEventHandler {
             let client = ureq::agent();
             loop {
                 // read all events off the queue
-                let events = receiver
-                    .try_iter()
-                    .collect::<Vec<Event>>();
+                let events = receiver.try_iter().collect::<Vec<Event>>();
 
                 // make request to server
                 let resp = client
@@ -288,7 +285,6 @@ impl EventHandler for WebEventHandler {
                 } else {
                     error!("Failed to send events");
                 }
-
 
                 // sleep for poll interval
                 // TODO: sensible value here

@@ -43,7 +43,7 @@ fn main() -> Result<(), String> {
     if let Ok(ifttt_webhook_key) = env::var("IFTTT_WEBHOOK_KEY") {
         debug!("Adding IFTTT web hook handler");
         let webhook_base_url =
-            env::var("IFTT_WEBHOOK_URL").unwrap_or("https://maker.ifttt.com".to_string());
+            env::var("IFTT_WEBHOOK_URL").unwrap_or_else(|_| "https://maker.ifttt.com".to_string());
 
         let webhook_url = format!(
             "{}/trigger/glow-data/with/key/{}",

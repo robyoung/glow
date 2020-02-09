@@ -1,5 +1,5 @@
 use chrono::{offset::Utc, DateTime};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -114,13 +114,17 @@ mod tests {
     #[test]
     fn serialize_a_message() {
         // arrange
-        let message = Message::Environment(EnvironmentEvent::Measurement(Measurement::new(12.3, 43.1)));
+        let message =
+            Message::Environment(EnvironmentEvent::Measurement(Measurement::new(12.3, 43.1)));
 
         // act
         let message_str = serde_json::to_string(&message);
 
         // assert
-        assert_eq!(message_str.unwrap(), r#"{"Environment":{"Measurement":{"temperature":12.3,"humidity":43.1}}}"#);
+        assert_eq!(
+            message_str.unwrap(),
+            r#"{"Environment":{"Measurement":{"temperature":12.3,"humidity":43.1}}}"#
+        );
     }
 
     #[test]
@@ -135,7 +139,7 @@ mod tests {
         assert_eq!(message_str.unwrap(), r#""Stop""#);
     }
 
-     #[test]
+    #[test]
     fn serialize_deserialize_an_event() {
         // arrange
         let event = Event::new_measurement(12.3, 43.1);
