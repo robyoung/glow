@@ -5,7 +5,9 @@ use actix_web::{middleware::Logger, web, App, HttpServer};
 use actix_web_httpauth::middleware::HttpAuthentication;
 use env_logger;
 
-use glow_web::{bearer_validator, index, store, store_events, AppState, EventsMonitor};
+use glow_web::{
+    bearer_validator, index, list_events, store, store_events, AppState, EventsMonitor,
+};
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -25,14 +27,21 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .wrap(Logger::default())
-            .wrap(HttpAuthentication::bearer(bearer_validator))
             .data(AppState {
                 token: app_token,
                 password: app_password,
             })
             .data(pool.clone())
             .route("/", web::get().to(index))
-            .route("/events", web::post().to(store_events))
+            .service(
+                web::scope("/api")
+                    .wrap(HttpAuthentication::bearer(bearer_validator))
+                    .service(
+                        web::resource("/events")
+                            .route(web::post().to(store_events))
+                            .route(web::get().to(list_events)),
+                    ),
+            )
     })
     .bind("127.0.0.1:8088")?
     .run()

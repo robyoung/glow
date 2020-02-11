@@ -14,7 +14,7 @@ use glow_events::{EnvironmentEvent, Event, Message};
 mod monitor;
 pub mod store;
 
-use crate::store::{insert_event, insert_measurement};
+use crate::store::{get_latest_events, insert_event, insert_measurement};
 
 pub use crate::monitor::EventsMonitor;
 
@@ -41,6 +41,12 @@ pub async fn store_events(
     }
     let return_events: Vec<Event> = vec![];
     HttpResponse::Ok().json(return_events)
+}
+
+pub async fn list_events(pool: web::Data<Pool<SqliteConnectionManager>>) -> impl Responder {
+    let conn = pool.get().unwrap();
+
+    HttpResponse::Ok().json(get_latest_events(&conn).unwrap())
 }
 
 pub async fn bearer_validator(

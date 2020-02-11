@@ -865,6 +865,7 @@ dependencies = [
  "actix-web-httpauth",
  "chrono",
  "env_logger",
+ "fallible-iterator",
  "glow_events",
  "r2d2",
  "r2d2_sqlite",

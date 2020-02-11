@@ -13,6 +13,7 @@ actix-rt = "1.0"
 r2d2 = "0.8"
 r2d2_sqlite = "0.14"
 rusqlite = { version = "0.21", features = ["chrono"] }
+fallible-iterator = "0.2"
 
 chrono = { version = "0.4", features = ["serde"] }
 env_logger = "0.6"
