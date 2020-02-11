@@ -11,9 +11,12 @@ use r2d2_sqlite::{self, SqliteConnectionManager};
 
 use glow_events::{EnvironmentEvent, Event, Message};
 
+mod monitor;
 pub mod store;
 
 use crate::store::{insert_event, insert_measurement};
+
+pub use crate::monitor::EventsMonitor;
 
 pub struct AppState {
     pub token: String,

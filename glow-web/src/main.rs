@@ -1,10 +1,11 @@
 extern crate glow_web;
 
+use actix::Actor;
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use actix_web_httpauth::middleware::HttpAuthentication;
 use env_logger;
 
-use glow_web::{bearer_validator, index, store, store_events, AppState};
+use glow_web::{bearer_validator, index, store, store_events, AppState, EventsMonitor};
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -15,6 +16,8 @@ async fn main() -> std::io::Result<()> {
     let app_password = std::env::var("APP_PASSWORD").expect("APP_PASSWORD is required");
 
     let pool = store::setup_db(db_path);
+
+    EventsMonitor::new(pool.clone()).start();
 
     HttpServer::new(move || {
         let app_token = app_token.clone();

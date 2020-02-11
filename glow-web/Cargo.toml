@@ -5,13 +5,14 @@ authors = ["Rob Young <rob@robyoung.digital>"]
 edition = "2018"
 
 [dependencies]
+actix = "0.9"
 actix-web = "2.0"
 actix-web-httpauth = "0.4.0"
 actix-rt = "1.0"
 
 r2d2 = "0.8"
 r2d2_sqlite = "0.14"
-rusqlite = "0.21"
+rusqlite = { version = "0.21", features = ["chrono"] }
 
 chrono = { version = "0.4", features = ["serde"] }
 env_logger = "0.6"

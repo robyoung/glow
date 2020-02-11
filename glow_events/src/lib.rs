@@ -15,6 +15,10 @@ impl Event {
         }
     }
 
+    pub fn raw(stamp: DateTime<Utc>, message: Message) -> Self {
+        Self { stamp, message }
+    }
+
     pub fn new_measurement(temperature: f64, humidity: f64) -> Event {
         Self::new(Message::Environment(EnvironmentEvent::Measurement(
             Measurement::new(temperature, humidity),
