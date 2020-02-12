@@ -1,52 +1,29 @@
 #[macro_use]
 extern crate rusqlite;
 
-use actix_web::{dev::ServiceRequest, web, Error, HttpResponse, Responder};
+use std::task::{Context, Poll};
+
+use actix_service::{Service, Transform};
+use actix_session::UserSession;
+use actix_web::{
+    dev::{ServiceRequest, ServiceResponse},
+    http, Error, HttpResponse,
+};
 use actix_web_httpauth::{
     extractors::{bearer::BearerAuth, AuthenticationError},
     headers::www_authenticate::bearer::Bearer,
 };
-use r2d2::Pool;
-use r2d2_sqlite::{self, SqliteConnectionManager};
-
-use glow_events::{EnvironmentEvent, Event, Message};
+use futures::future::{ok, Either, Ready};
 
 mod monitor;
+pub mod routes;
 pub mod store;
-
-use crate::store::{get_latest_events, insert_event, insert_measurement};
 
 pub use crate::monitor::EventsMonitor;
 
 pub struct AppState {
     pub token: String,
     pub password: String,
-}
-
-pub async fn index(state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().body(format!("Hi: {} {}", state.token, state.password))
-}
-
-pub async fn store_events(
-    pool: web::Data<Pool<SqliteConnectionManager>>,
-    events: web::Json<Vec<Event>>,
-) -> impl Responder {
-    let conn = pool.get().unwrap();
-
-    for event in events.0.iter() {
-        insert_event(&conn, event).unwrap();
-        if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
-            insert_measurement(&conn, event.stamp(), measurement).unwrap();
-        }
-    }
-    let return_events: Vec<Event> = vec![];
-    HttpResponse::Ok().json(return_events)
-}
-
-pub async fn list_events(pool: web::Data<Pool<SqliteConnectionManager>>) -> impl Responder {
-    let conn = pool.get().unwrap();
-
-    HttpResponse::Ok().json(get_latest_events(&conn).unwrap())
 }
 
 pub async fn bearer_validator(
@@ -59,4 +36,65 @@ pub async fn bearer_validator(
         }
     }
     Err(AuthenticationError::new(Bearer::default()).into())
+}
+
+pub struct CheckLogin;
+
+impl<S, B> Transform<S> for CheckLogin
+where
+    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S::Future: 'static,
+{
+    type Request = ServiceRequest;
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type InitError = ();
+    type Transform = CheckLoginMiddleware<S>;
+    type Future = Ready<Result<Self::Transform, Self::InitError>>;
+
+    fn new_transform(&self, service: S) -> Self::Future {
+        ok(CheckLoginMiddleware { service })
+    }
+}
+pub struct CheckLoginMiddleware<S> {
+    service: S,
+}
+
+impl<S, B> Service for CheckLoginMiddleware<S>
+where
+    S: Service<Request = ServiceRequest, Response = ServiceResponse<B>, Error = Error>,
+    S::Future: 'static,
+{
+    type Request = ServiceRequest;
+    type Response = ServiceResponse<B>;
+    type Error = Error;
+    type Future = Either<S::Future, Ready<Result<Self::Response, Self::Error>>>;
+
+    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: ServiceRequest) -> Self::Future {
+        let authenticated: bool = req
+            .get_session()
+            .get("authenticated")
+            .unwrap_or(None)
+            .unwrap_or(false);
+
+        if authenticated {
+            Either::Left(self.service.call(req))
+        } else {
+            // Don't forward to /login if we are already on /login
+            if req.path() == "/login" {
+                Either::Left(self.service.call(req))
+            } else {
+                Either::Right(ok(req.into_response(
+                    HttpResponse::Found()
+                        .header(http::header::LOCATION, "/login")
+                        .finish()
+                        .into_body(),
+                )))
+            }
+        }
+    }
 }

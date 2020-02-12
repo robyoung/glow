@@ -1,13 +1,14 @@
 extern crate glow_web;
 
 use actix::Actor;
+use actix_session::CookieSession;
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use actix_web_httpauth::middleware::HttpAuthentication;
+use base64;
 use env_logger;
+use tera::Tera;
 
-use glow_web::{
-    bearer_validator, index, list_events, store, store_events, AppState, EventsMonitor,
-};
+use glow_web::{bearer_validator, routes, store, AppState, CheckLogin, EventsMonitor};
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -16,6 +17,9 @@ async fn main() -> std::io::Result<()> {
     let db_path = std::env::var("DB_PATH").expect("DB_PATH is required");
     let app_token = std::env::var("APP_TOKEN").expect("APP_TOKEN is required");
     let app_password = std::env::var("APP_PASSWORD").expect("APP_PASSWORD is required");
+    let cookie_key =
+        base64::decode(&std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET is required"))
+            .expect("COOKIE_SECRET is not valid base64");
 
     let pool = store::setup_db(db_path);
 
@@ -24,22 +28,41 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         let app_token = app_token.clone();
         let app_password = app_password.clone();
+        let cookie_key = cookie_key.clone();
+        let tera = Tera::new(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/**/*")).unwrap();
 
         App::new()
             .wrap(Logger::default())
+            .wrap(
+                CookieSession::signed(&cookie_key)
+                    .name("glow")
+                    .http_only(true)
+                    .secure(false),
+            )
             .data(AppState {
                 token: app_token,
                 password: app_password,
             })
             .data(pool.clone())
-            .route("/", web::get().to(index))
+            .data(tera)
+            .service(
+                web::resource("/login")
+                    .route(web::get().to(routes::login))
+                    .route(web::post().to(routes::do_login)),
+            )
+            .service(
+                web::scope("/")
+                    .wrap(CheckLogin)
+                    .route("", web::get().to(routes::index))
+                    .route("/logout", web::get().to(routes::logout)),
+            )
             .service(
                 web::scope("/api")
                     .wrap(HttpAuthentication::bearer(bearer_validator))
                     .service(
                         web::resource("/events")
-                            .route(web::post().to(store_events))
-                            .route(web::get().to(list_events)),
+                            .route(web::post().to(routes::store_events))
+                            .route(web::get().to(routes::list_events)),
                     ),
             )
     })

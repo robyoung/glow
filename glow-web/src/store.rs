@@ -4,7 +4,7 @@ use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::{self, SqliteConnectionManager};
 use rusqlite::{types::FromSqlError, Result, Row, NO_PARAMS};
 
-use glow_events::{Event, Measurement};
+use glow_events::{EnvironmentEvent, Event, Measurement, Message};
 
 pub fn setup_db(db_path: String) -> Pool<SqliteConnectionManager> {
     let pool = Pool::new(SqliteConnectionManager::file(db_path)).unwrap();
@@ -79,7 +79,7 @@ pub(crate) fn get_latest_events(
 ) -> Result<Vec<Event>> {
     conn.prepare("SELECT stamp, message FROM events ORDER BY stamp DESC LIMIT 20")?
         .query(NO_PARAMS)?
-        .map(parse_row)
+        .map(parse_event_row)
         .collect()
 }
 
@@ -98,7 +98,7 @@ pub(crate) fn get_latest_event(conn: &PooledConnection<SqliteConnectionManager>)
     let result = conn.query_row(
         "SELECT stamp, message FROM events ORDER BY stamp DESC LIMIT 1",
         NO_PARAMS,
-        parse_row,
+        parse_event_row,
     );
     match result {
         Ok(event) => Some(event),
@@ -106,12 +106,36 @@ pub(crate) fn get_latest_event(conn: &PooledConnection<SqliteConnectionManager>)
     }
 }
 
-fn parse_row(row: &Row<'_>) -> Result<Event> {
+pub(crate) fn get_latest_measurement(
+    conn: &PooledConnection<SqliteConnectionManager>,
+) -> Option<Event> {
+    let result = conn.query_row(
+        "SELECT stamp, temperature, humidity FROM environment_measurements ORDER BY stamp DESC LIMIT 1",
+        NO_PARAMS,
+        parse_measurement_row,
+    );
+    match result {
+        Ok(event) => Some(event),
+        _ => None,
+    }
+}
+
+fn parse_event_row(row: &Row<'_>) -> Result<Event> {
     let message_str: String = row.get(1)?;
     match serde_json::from_str(&message_str) {
         Ok(message) => Ok(Event::raw(row.get(0)?, message)),
         Err(err) => Err(FromSqlError::Other(Box::new(err)).into()),
     }
+}
+
+fn parse_measurement_row(row: &Row<'_>) -> Result<Event> {
+    Ok(Event::raw(
+        row.get(0)?,
+        Message::Environment(EnvironmentEvent::Measurement(Measurement::new(
+            row.get(1)?,
+            row.get(2)?,
+        ))),
+    ))
 }
 
 pub(crate) fn queue_event(
