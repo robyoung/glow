@@ -1,4 +1,4 @@
-use std::{cell::Cell, cmp::Ordering, f32, fmt, thread, time};
+use std::{cmp::Ordering, f32, fmt, thread, time};
 
 use blinkt::Blinkt;
 
@@ -10,89 +10,29 @@ pub const COLOUR_SALMON: Colour = Colour(160, 10, 1);
 pub const COLOUR_CORAL: Colour = Colour(255, 1, 1);
 pub const COLOUR_RED: Colour = Colour(255, 0, 100);
 
-pub trait LedBrightness {
-    fn next(&mut self);
-    fn value(&self) -> f32;
-}
-
-pub enum StaticLedBrightness {
+pub enum Brightness {
     Dim,
     Bright,
     Off,
 }
 
-impl LedBrightness for StaticLedBrightness {
-    fn next(&mut self) {
-        *self = match self {
-            StaticLedBrightness::Dim => StaticLedBrightness::Bright,
-            StaticLedBrightness::Bright => StaticLedBrightness::Off,
-            StaticLedBrightness::Off => StaticLedBrightness::Dim,
-        };
-    }
-
-    fn value(&self) -> f32 {
-        match self {
-            StaticLedBrightness::Dim => 0.05,
-            StaticLedBrightness::Bright => 0.5,
-            StaticLedBrightness::Off => 0.0,
-        }
-    }
-}
-
-pub struct DynamicLEDBrightness {
-    client: ureq::Agent,
-    url: String,
-    last_received: time::Instant,
-    current_value: Cell<Option<f32>>,
-}
-
-const LED_BRIGHTNESS_UPDATE_TIME: u64 = 2;
-
-impl DynamicLEDBrightness {
-    pub fn new(url: String) -> DynamicLEDBrightness {
-        DynamicLEDBrightness {
-            client: ureq::agent(),
-            url,
-            last_received: time::Instant::now() - time::Duration::from_secs(100_000),
-            current_value: Cell::new(None),
-        }
-    }
-
-    fn get_value(&self) -> Option<f32> {
-        let resp = self.client.get(self.url.as_str()).call();
-        if resp.error() {
-            error!(
-                "Failed to get new LED brightness value: {:?}",
-                resp.status()
-            );
-            return None;
-        }
-
-        if let Ok(data) = resp.into_string() {
-            if let Ok(value) = data.trim().parse::<f32>() {
-                return Some(value);
-            } else {
-                error!("Failed to parse LED brightness value: {}", data);
-            }
+impl Brightness {
+    pub(crate) fn next_from(brightness: f32) -> Self {
+        if brightness < Brightness::Dim.value() {
+            Brightness::Bright
+        } else if brightness < Brightness::Bright.value() {
+            Brightness::Off
         } else {
-            error!("Failed to read LED brightness response");
+            Brightness::Dim
         }
-        None
     }
-}
 
-impl LedBrightness for DynamicLEDBrightness {
-    fn next(&mut self) {}
-    fn value(&self) -> f32 {
-        if self.current_value.get().is_none()
-            || self.last_received.elapsed() > time::Duration::from_secs(LED_BRIGHTNESS_UPDATE_TIME)
-        {
-            debug!("Updating LED brightness");
-            if let Some(value) = self.get_value() {
-                self.current_value.set(Some(value));
-            }
+    pub(crate) fn value(&self) -> f32 {
+        match self {
+            Brightness::Dim => 0.05,
+            Brightness::Bright => 0.5,
+            Brightness::Off => 0.0,
         }
-        self.current_value.get().unwrap()
     }
 }
 
@@ -256,7 +196,7 @@ pub trait LEDs {
         for colour in colours.iter() {
             for i in 0..NUM_PIXELS {
                 current_colours[i as usize] = *colour;
-                self.show(&current_colours, StaticLedBrightness::Bright.value())?;
+                self.show(&current_colours, Brightness::Bright.value())?;
                 thread::sleep(time::Duration::from_millis(50));
             }
         }

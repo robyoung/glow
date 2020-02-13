@@ -8,11 +8,10 @@ use std::env;
 
 use glow_device::events::{run_loop, EventHandler};
 use glow_device::leds::{
-    BlinktLEDs, ColourRange, DynamicLEDBrightness, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE,
-    COLOUR_RED, COLOUR_SALMON,
+    BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED, COLOUR_SALMON,
 };
 use glow_device::{EnvironmentSensor, VibrationSensor};
-use glow_device::{LEDHandler, WebHookHandler};
+use glow_device::{LEDBrightnessHandler, LEDHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
@@ -29,14 +28,15 @@ fn main() -> Result<(), String> {
         ],
     )?;
     let leds = BlinktLEDs::new();
-    let brightness = DynamicLEDBrightness::new(String::from(
-        "https://raw.githubusercontent.com/robyoung/data/master/glow-brightness",
-    ));
-    let led_handler = LEDHandler::new_with_brightness(leds, colour_range, brightness);
+    let brightness_handler = LEDBrightnessHandler::new(
+        &"https://raw.githubusercontent.com/robyoung/data/master/glow-brightness",
+    );
+    let led_handler = LEDHandler::new(leds, colour_range);
 
     let mut handlers: Vec<Box<dyn EventHandler>> = vec![
         Box::new(EnvironmentSensor {}),
         Box::new(VibrationSensor {}),
+        Box::new(brightness_handler),
         Box::new(led_handler),
     ];
 

@@ -61,7 +61,8 @@ pub enum TPLinkEvent {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum LEDEvent {
-    SetBrightness(u32),
+    Brightness(f32),
+    UpdateBrightness,
     Party,
     Update,
 }

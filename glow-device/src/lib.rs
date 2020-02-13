@@ -25,7 +25,7 @@ use rppal::{
 use glow_events::{EnvironmentEvent, Event, LEDEvent, Measurement, Message, TapEvent};
 
 use crate::events::EventHandler;
-use crate::leds::{Colour, ColourRange, LEDs, LedBrightness, StaticLedBrightness};
+use crate::leds::{Brightness, Colour, ColourRange, LEDs};
 
 pub struct EnvironmentSensor {}
 
@@ -167,29 +167,103 @@ impl EventHandler for PrintMeasurementHandler {
     }
 }
 
+const LED_BRIGHTNESS_UPDATE_TIME: u64 = 2;
+
+pub struct LEDBrightnessHandler {
+    client: ureq::Agent,
+    url: String,
+    last_received: time::Instant,
+    brightness: f32,
+}
+
+impl LEDBrightnessHandler {
+    pub fn new(url: &str) -> Self {
+        Self {
+            client: ureq::agent(),
+            url: String::from(url),
+            last_received: time::Instant::now() - time::Duration::from_secs(100_000),
+            brightness: Brightness::Off.value(),
+        }
+    }
+
+    fn get_value_from_remote(&self) -> Option<f32> {
+        let resp = self.client.get(self.url.as_str()).call();
+        if resp.error() {
+            error!(
+                "Failed to get new LED brightness value: {:?}",
+                resp.status()
+            );
+            return None;
+        }
+
+        if let Ok(data) = resp.into_string() {
+            if let Ok(value) = data.trim().parse::<f32>() {
+                return Some(value);
+            } else {
+                error!("Failed to parse LED brightness value: {}", data);
+            }
+        } else {
+            error!("Failed to read LED brightness response");
+        }
+        None
+    }
+
+    fn get_value(&mut self) -> f32 {
+        if self.last_received.elapsed() > time::Duration::from_secs(LED_BRIGHTNESS_UPDATE_TIME) {
+            debug!("Updating LED brightness");
+            if let Some(value) = self.get_value_from_remote() {
+                self.brightness = value;
+                self.last_received = time::Instant::now();
+            }
+        }
+        self.brightness
+    }
+}
+
+impl EventHandler for LEDBrightnessHandler {
+    fn start(&mut self, sender: SyncSender<Event>) {
+        if let Err(err) = sender.send(Event::new(Message::LED(LEDEvent::UpdateBrightness))) {
+            warn!("could not initiate brightness handler: {:?}", err);
+        }
+    }
+
+    fn handle(&mut self, event: &Event, sender: &SyncSender<Event>) {
+        match event.message() {
+            Message::LED(LEDEvent::UpdateBrightness)
+            | Message::Environment(EnvironmentEvent::Measurement(_)) => {
+                sender
+                    .send(Event::new(Message::LED(LEDEvent::Brightness(
+                        self.get_value(),
+                    ))))
+                    .unwrap();
+            }
+            Message::Tap(TapEvent::SingleTap) => {
+                sender
+                    .send(Event::new(Message::LED(LEDEvent::Brightness(
+                        Brightness::next_from(self.brightness).value(),
+                    ))))
+                    .unwrap();
+            }
+            _ => {}
+        }
+    }
+}
+
 pub struct LEDHandler {
     leds: Box<dyn LEDs>,
     colour_range: ColourRange,
     colours: Vec<Colour>,
-    brightness: Box<dyn LedBrightness>,
+    brightness: Option<f32>,
 }
 
 impl LEDHandler {
     pub fn new(leds: impl LEDs + 'static, colour_range: ColourRange) -> Self {
-        Self::new_with_brightness(leds, colour_range, StaticLedBrightness::Dim)
-    }
-
-    pub fn new_with_brightness(
-        leds: impl LEDs + 'static,
-        colour_range: ColourRange,
-        brightness: impl LedBrightness + 'static,
-    ) -> Self {
         let colours = colour_range.all(Colour::black());
         Self {
             leds: Box::new(leds),
             colour_range,
             colours,
-            brightness: Box::new(brightness),
+            brightness: None,
         }
     }
 }
@@ -205,7 +279,6 @@ impl EventHandler for LEDHandler {
                     .unwrap();
             }
             Message::Tap(TapEvent::SingleTap) => {
-                self.brightness.next();
                 sender
                     .send(Event::new(Message::LED(LEDEvent::Party)))
                     .unwrap();
@@ -219,9 +292,14 @@ impl EventHandler for LEDHandler {
                 }
             }
             Message::LED(LEDEvent::Update) => {
-                if let Err(err) = self.leds.show(&self.colours, self.brightness.value()) {
-                    error!("show error: {}", err);
+                if let Some(brightness) = self.brightness {
+                    if let Err(err) = self.leds.show(&self.colours, brightness) {
+                        error!("show error: {}", err);
+                    }
                 }
+            }
+            Message::LED(LEDEvent::Brightness(brightness)) => {
+                self.brightness = Some(*brightness);
             }
             _ => {}
         }
