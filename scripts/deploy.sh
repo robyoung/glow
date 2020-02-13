@@ -2,9 +2,10 @@
 
 set -e
 
+PACKAGE="glow-device"
 TRIPPLE="arm-unknown-linux-musleabihf"
 TARGET_DIR="./target/${TRIPPLE}/release"
-TARGET="${TARGET_DIR}/glow-device"
+TARGET="${TARGET_DIR}/${PACKAGE}"
 
 fail() {
   >&2 echo $1
@@ -17,7 +18,7 @@ fail() {
 
 
 ssh $BOBNET_GLOW_DEPLOY_TARGET hostname > /dev/null
-cross build --release --target=$TRIPPLE
+cross build --package=$PACKAGE --release --target=$TRIPPLE
 
 image=$(docker images --format '{{.Repository}}:{{.Tag}}' rustembedded/cross | grep $TRIPPLE)
 docker \
