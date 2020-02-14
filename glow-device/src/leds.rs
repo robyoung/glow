@@ -2,7 +2,7 @@ use std::{cmp::Ordering, f32, fmt, thread, time};
 
 use blinkt::Blinkt;
 
-const NUM_PIXELS: u8 = 8;
+const NUM_PIXELS: usize = 8;
 
 pub const COLOUR_BLUE: Colour = Colour(10, 10, 226);
 pub const COLOUR_ORANGE: Colour = Colour(120, 20, 0);
@@ -36,7 +36,7 @@ impl Brightness {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Copy)]
+#[derive(Default, Clone, PartialEq, Eq, Copy)]
 pub struct Colour(pub u8, pub u8, pub u8);
 
 impl Colour {
@@ -150,7 +150,7 @@ impl ColourRange {
                 .collect();
             Ok(ColourRange {
                 buckets,
-                num_pixels: NUM_PIXELS,
+                num_pixels: NUM_PIXELS as u8,
             })
         }
     }
@@ -239,6 +239,14 @@ impl BlinktLEDs {
     }
 }
 
+fn get_pivot(colours: &[Colour; NUM_PIXELS]) -> usize {
+    for i in 1..NUM_PIXELS {
+        if colours[i - 1] != colours[i] {
+            return i;
+        }
+    }
+    0
+}
 /// calculate brightness to send to Blinkt
 ///
 /// The Blinkt will switch a LED off with a brightness of less than 0.04.
@@ -250,20 +258,53 @@ impl BlinktLEDs {
 /// 0.02  *  **  *
 /// 0.03  * ** ***
 /// 0.04  ********
-#[allow(clippy::if_same_then_else)]
-pub(self) fn get_blinkt_brightness(pixel: usize, brightness: f32) -> f32 {
-    if [1, 2, 3, 4, 5, 6].contains(&pixel) && (brightness - 0.01).abs() < f32::EPSILON {
-        0.0
-    } else if [1, 2, 5, 6].contains(&pixel) && (brightness - 0.02).abs() < f32::EPSILON {
-        0.0
-    } else if [1, 4].contains(&pixel) && (brightness - 0.03).abs() < f32::EPSILON {
-        0.0
-    } else if brightness < 0.01 {
-        0.0
-    } else if brightness < 0.04 {
-        0.04
+pub(self) fn get_blinkt_brightness(
+    colours: &[Colour; NUM_PIXELS],
+    brightness: f32,
+) -> [f32; NUM_PIXELS] {
+    let pivot = get_pivot(colours);
+    let x = 0.04;
+    let o = 0.0;
+    if (brightness + f32::EPSILON) < 0.01 {
+        [0.0; NUM_PIXELS]
+    } else if (brightness + f32::EPSILON) < 0.02 {
+        match pivot {
+            0 => [x, o, o, o, o, o, o, x],
+            1 => [x, x, o, o, o, o, o, o],
+            2 => [x, o, x, o, o, o, o, o],
+            3 => [x, o, o, x, o, o, o, o],
+            4 => [x, o, o, o, x, o, o, o],
+            5 => [x, o, o, o, o, x, o, o],
+            6 => [x, o, o, o, o, o, x, o],
+            7 => [x, o, o, o, o, o, o, x],
+            _ => unreachable!("pivot cannot be more than 7"),
+        }
+    } else if (brightness + f32::EPSILON) < 0.03 {
+        match pivot {
+            0 => [x, o, o, o, x, o, o, x],
+            1 => [x, x, o, o, o, o, o, x],
+            2 => [x, o, x, o, o, o, o, x],
+            3 => [x, o, o, x, o, o, o, x],
+            4 => [x, o, o, o, x, o, o, x],
+            5 => [x, o, o, o, o, x, o, x],
+            6 => [x, o, o, o, o, o, x, x],
+            7 => [x, o, o, o, o, o, x, x],
+            _ => unreachable!("pivot cannot be more than 7"),
+        }
+    } else if (brightness + f32::EPSILON) < 0.04 {
+        match pivot {
+            0 => [x, o, o, x, x, o, o, x],
+            1 => [x, x, x, o, o, o, o, x],
+            2 => [x, x, x, o, o, o, o, x],
+            3 => [x, o, x, x, o, o, o, x],
+            4 => [x, o, o, x, x, o, o, x],
+            5 => [x, o, o, o, x, x, o, x],
+            6 => [x, o, o, o, o, x, x, x],
+            7 => [x, o, o, o, o, x, x, x],
+            _ => unreachable!("pivot cannot be more than 7"),
+        }
     } else {
-        brightness
+        [brightness; NUM_PIXELS]
     }
 }
 
@@ -274,17 +315,16 @@ impl Default for BlinktLEDs {
 }
 
 impl LEDs for BlinktLEDs {
-    // TODO: maybe refactor so that Colour includes brightness
     fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
         if self.should_update(colours, brightness) {
-            for (pixel, colour) in colours.iter().enumerate() {
-                self.blinkt.set_pixel_rgbb(
-                    pixel,
-                    colour.0,
-                    colour.1,
-                    colour.2,
-                    get_blinkt_brightness(pixel, brightness),
-                );
+            let mut colours_array: [Colour; NUM_PIXELS] = Default::default();
+            colours_array.copy_from_slice(colours);
+            let brightnesses = get_blinkt_brightness(&colours_array, brightness);
+            let details = colours.iter().enumerate().zip(brightnesses.iter());
+
+            for ((pixel, colour), &brightness) in details {
+                self.blinkt
+                    .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
             }
 
             if let Err(err) = self.blinkt.show() {
@@ -387,26 +427,117 @@ mod tests {
         );
     }
 
-    fn test_blinkt_brightness_helper(brightness: f32, expected: [f32; 8]) {
-        let actual = [brightness; 8]
-            .iter()
-            .enumerate()
-            .map(|(pixel, brightness)| get_blinkt_brightness(pixel, *brightness))
-            .collect::<Vec<f32>>();
-
-        assert_eq!(expected, actual.as_slice());
+    #[test]
+    fn getting_pivot() {
+        assert_eq!(get_pivot(&[COLOUR_BLUE; NUM_PIXELS]), 0);
+        assert_eq!(
+            get_pivot(&[
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+            ]),
+            3
+        );
+        assert_eq!(
+            get_pivot(&[
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_ORANGE,
+                COLOUR_ORANGE,
+            ]),
+            6
+        );
+        assert_eq!(
+            get_pivot(&[
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_BLUE,
+                COLOUR_ORANGE,
+            ]),
+            7
+        );
     }
 
     #[test]
-    fn test_blinkt_brightness() {
-        test_blinkt_brightness_helper(0.0, [0.0; 8]);
-        test_blinkt_brightness_helper(0.005, [0.0; 8]);
-        test_blinkt_brightness_helper(0.01, [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04]);
-        test_blinkt_brightness_helper(0.02, [0.04, 0.0, 0.0, 0.04, 0.04, 0.0, 0.0, 0.04]);
-        test_blinkt_brightness_helper(0.03, [0.04, 0.0, 0.04, 0.04, 0.0, 0.04, 0.04, 0.04]);
-        test_blinkt_brightness_helper(0.03, [0.04, 0.0, 0.04, 0.04, 0.0, 0.04, 0.04, 0.04]);
-        test_blinkt_brightness_helper(0.04, [0.04; 8]);
-        test_blinkt_brightness_helper(0.05, [0.05; 8]);
-        test_blinkt_brightness_helper(0.1, [0.1; 8]);
+    fn get_blinkt_brightness_when_off() {
+        assert_eq!(get_blinkt_brightness(&[
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+        ], 0.005), [0.0; 8]);
+    }
+
+    #[test]
+    fn get_blinkt_brightness_when_two_leds() {
+        assert_eq!(get_blinkt_brightness(&[
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+            COLOUR_ORANGE,
+        ], 0.01), [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0]);
+    }
+
+    #[test]
+    fn get_blinkt_brightness_when_three_leds() {
+        assert_eq!(get_blinkt_brightness(&[
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+            COLOUR_ORANGE,
+        ], 0.02), [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04]);
+    }
+
+    #[test]
+    fn get_blinkt_brightness_when_four_leds() {
+        assert_eq!(get_blinkt_brightness(&[
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+            COLOUR_ORANGE,
+        ], 0.03), [0.04, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04, 0.04]);
+    }
+
+    #[test]
+    fn get_blinkt_brightness_when_on() {
+        assert_eq!(get_blinkt_brightness(&[
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+            COLOUR_ORANGE,
+        ], 0.04), [0.04; 8]);
     }
 }
