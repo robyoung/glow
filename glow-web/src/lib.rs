@@ -88,13 +88,15 @@ where
             if req.path() == "/login" {
                 Either::Left(self.service.call(req))
             } else {
-                Either::Right(ok(req.into_response(
-                    HttpResponse::Found()
-                        .header(http::header::LOCATION, "/login")
-                        .finish()
-                        .into_body(),
-                )))
+                Either::Right(ok(req.into_response(found("/login"))))
             }
         }
     }
+}
+
+pub(crate) fn found<B>(location: &str) -> HttpResponse<B> {
+    HttpResponse::Found()
+        .header(http::header::LOCATION, location)
+        .finish()
+        .into_body()
 }

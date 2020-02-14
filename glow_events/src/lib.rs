@@ -32,6 +32,14 @@ impl Event {
     pub fn message(&self) -> &Message {
         &self.message
     }
+
+    pub fn measurement(&self) -> Option<Measurement> {
+        if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = self.message {
+            Some(measurement)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

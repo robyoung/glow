@@ -1,12 +1,12 @@
 use actix_session::Session;
-use actix_web::{error, http, web, Error, HttpResponse, Responder};
+use actix_web::{error, web, Error, HttpResponse, Responder};
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::Deserialize;
 
 use glow_events::{EnvironmentEvent, Event, Message};
 
-use crate::{store, AppState};
+use crate::{store, AppState, found};
 
 fn render(
     tmpl: web::Data<tera::Tera>,
@@ -25,7 +25,13 @@ pub async fn index(
 ) -> Result<HttpResponse, Error> {
     let conn = pool.get().unwrap();
     let mut ctx = tera::Context::new();
-    ctx.insert("measurement", &store::get_latest_measurement(&conn));
+    if let Some(event) = store::get_latest_measurement(&conn) {
+        ctx.insert("event", &event);
+        if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
+            ctx.insert("measurement", measurement);
+            ctx.insert("measurement_stamp", &format!("{}", event.stamp().format("%e %B %H:%M")));
+        }
+    }
     render(tmpl, "index.html", Some(&ctx))
 }
 
@@ -45,10 +51,7 @@ pub async fn do_login(
 ) -> Result<HttpResponse, Error> {
     if form.password == state.password {
         session.set("authenticated", true)?;
-        Ok(HttpResponse::Found()
-            .header(http::header::LOCATION, "/")
-            .finish()
-            .into_body())
+        Ok(found("/"))
     } else {
         Err(error::ErrorUnauthorized("bad password"))
     }
@@ -56,10 +59,7 @@ pub async fn do_login(
 
 pub async fn logout(session: Session) -> Result<HttpResponse, Error> {
     session.set("authenticated", false)?;
-    Ok(HttpResponse::Found()
-        .header(http::header::LOCATION, "/login")
-        .finish()
-        .into_body())
+    Ok(found("/login"))
 }
 
 pub async fn store_events(

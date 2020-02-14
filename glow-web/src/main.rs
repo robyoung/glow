@@ -46,6 +46,15 @@ async fn main() -> std::io::Result<()> {
             .data(pool.clone())
             .data(tera)
             .service(
+                web::scope("/api")
+                    .wrap(HttpAuthentication::bearer(bearer_validator))
+                    .service(
+                        web::resource("/events")
+                            .route(web::post().to(routes::store_events))
+                            .route(web::get().to(routes::list_events)),
+                    ),
+            )
+            .service(
                 web::resource("/login")
                     .route(web::get().to(routes::login))
                     .route(web::post().to(routes::do_login)),
@@ -55,15 +64,6 @@ async fn main() -> std::io::Result<()> {
                     .wrap(CheckLogin)
                     .route("", web::get().to(routes::index))
                     .route("/logout", web::get().to(routes::logout)),
-            )
-            .service(
-                web::scope("/api")
-                    .wrap(HttpAuthentication::bearer(bearer_validator))
-                    .service(
-                        web::resource("/events")
-                            .route(web::post().to(routes::store_events))
-                            .route(web::get().to(routes::list_events)),
-                    ),
             )
     })
     .bind("127.0.0.1:8088")?
