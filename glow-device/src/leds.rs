@@ -4,7 +4,7 @@ use blinkt::Blinkt;
 
 const NUM_PIXELS: usize = 8;
 
-pub const COLOUR_BLUE: Colour = Colour(10, 10, 226);
+pub const COLOUR_BLUE: Colour = Colour(10, 10, 100);
 pub const COLOUR_ORANGE: Colour = Colour(120, 20, 0);
 pub const COLOUR_SALMON: Colour = Colour(160, 10, 1);
 pub const COLOUR_CORAL: Colour = Colour(255, 1, 1);
