@@ -66,7 +66,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/logout", web::get().to(routes::logout)),
             )
     })
-    .bind("127.0.0.1:8088")?
+    .bind("0.0.0.0:8088")?
     .run()
     .await
 }

@@ -337,6 +337,8 @@ impl EventHandler for WebEventHandler {
             loop {
                 // read all events off the queue
                 let events = receiver.try_iter().collect::<Vec<Event>>();
+                let mut seen_events = events.len() > 0;
+                info!("received {:?} events in web event thread", events.len());
 
                 // make request to server
                 let resp = client
@@ -349,6 +351,7 @@ impl EventHandler for WebEventHandler {
                 if resp.ok() {
                     if let Ok(data) = resp.into_json() {
                         if let Ok(events) = serde_json::from_value::<Vec<Event>>(data) {
+                            seen_events = seen_events || events.len() > 0;
                             for event in events {
                                 if let Err(err) = sender.send(event) {
                                     error!("failed to send remote error to bus {:?}", err);
@@ -365,13 +368,14 @@ impl EventHandler for WebEventHandler {
                 }
 
                 // sleep for poll interval
-                // TODO: sensible value here
-                thread::sleep(time::Duration::from_secs(1));
+                let sleep = if seen_events { 1 } else { 5 };
+                thread::sleep(time::Duration::from_secs(sleep));
             }
         });
     }
 
     fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
+        info!("handling event in web event handler method");
         if let Err(err) = self.sender.send(event.clone()) {
             error!("failed to send event to remote worker: {:?}", err);
         }

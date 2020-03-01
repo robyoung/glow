@@ -11,7 +11,7 @@ use glow_device::leds::{
     BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED, COLOUR_SALMON,
 };
 use glow_device::{EnvironmentSensor, VibrationSensor};
-use glow_device::{LEDBrightnessHandler, LEDHandler, WebHookHandler};
+use glow_device::{LEDBrightnessHandler, LEDHandler, WebHookHandler, WebEventHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
@@ -43,13 +43,18 @@ fn main() -> Result<(), String> {
     if let Ok(ifttt_webhook_key) = env::var("IFTTT_WEBHOOK_KEY") {
         debug!("Adding IFTTT web hook handler");
         let webhook_base_url =
-            env::var("IFTT_WEBHOOK_URL").unwrap_or_else(|_| "https://maker.ifttt.com".to_string());
+            env::var("IFTTT_WEBHOOK_URL").unwrap_or_else(|_| "https://maker.ifttt.com".to_string());
 
         let webhook_url = format!(
             "{}/trigger/glow-data/with/key/{}",
             webhook_base_url, ifttt_webhook_key
         );
         handlers.push(Box::new(WebHookHandler::new(webhook_url)));
+    }
+
+    if let (Ok(web_event_url), Ok(web_event_token)) = (env::var("WEB_EVENT_URL"), env::var("WEB_EVENT_TOKEN")) {
+        info!("Adding web event handler");
+        handlers.push(Box::new(WebEventHandler::new(web_event_url, web_event_token)));
     }
 
     run_loop(handlers);
