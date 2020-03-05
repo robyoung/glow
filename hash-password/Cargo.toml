@@ -1,0 +1,9 @@
+[package]
+name = "hash-password"
+version = "0.1.0"
+authors = ["Rob Young <rob@robyoung.digital>"]
+edition = "2018"
+
+[dependencies]
+base64 = "0.11"
+rust-argon2 = "0.8"

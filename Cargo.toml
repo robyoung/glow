@@ -3,6 +3,7 @@ members = [
   "glow-device",
   "glow-web",
   "glow_events",
+  "hash-password",
 ]
 
 [profile.release]

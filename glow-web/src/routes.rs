@@ -1,12 +1,13 @@
 use actix_session::Session;
 use actix_web::{error, web, Error, HttpResponse, Responder};
+use argon2;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::Deserialize;
 
 use glow_events::{EnvironmentEvent, Event, Message};
 
-use crate::{store, AppState, found};
+use crate::{found, store, AppState};
 
 fn render(
     tmpl: web::Data<tera::Tera>,
@@ -29,7 +30,10 @@ pub async fn index(
         ctx.insert("event", &event);
         if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
             ctx.insert("measurement", measurement);
-            ctx.insert("measurement_stamp", &format!("{}", event.stamp().format("%e %B %H:%M")));
+            ctx.insert(
+                "measurement_stamp",
+                &format!("{}", event.stamp().format("%e %B %H:%M")),
+            );
         }
     }
     render(tmpl, "index.html", Some(&ctx))
@@ -49,7 +53,7 @@ pub async fn do_login(
     state: web::Data<AppState>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    if form.password == state.password {
+    if argon2::verify_encoded(&state.password, form.password.as_bytes()).unwrap() {
         session.set("authenticated", true)?;
         Ok(found("/"))
     } else {

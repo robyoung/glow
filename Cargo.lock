@@ -360,6 +360,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d7b8a9123b8027467bce0099fe556c628a53c8d83df0507084c31e9ba2e39aff"
 
 [[package]]
+name = "arrayref"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a4c527152e37cf757a3f78aae5a06fbeefdb07ccc535c980a3208ee3060dd544"
+
+[[package]]
+name = "arrayvec"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cff77d8686867eceff3105329d4698d96c2391c176d5d03adc90c7389162b5b8"
+
+[[package]]
 name = "async-trait"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -458,6 +470,17 @@ name = "bitflags"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf1de2fe8c75bc145a2f577add951f8134889b4795d47466a54a5c846d691693"
+
+[[package]]
+name = "blake2b_simd"
+version = "0.5.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8fb2d74254a3a0b5cac33ac9f8ed0e44aa50378d9dbb2e5d83bd21ed1dc2c8a"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "constant_time_eq",
+]
 
 [[package]]
 name = "blinkt"
@@ -599,6 +622,12 @@ checksum = "ddfc5b9aa5d4507acaf872de71051dfd0e309860e88966e1051e462a077aac4f"
 dependencies = [
  "bitflags",
 ]
+
+[[package]]
+name = "constant_time_eq"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "245097e9a4535ee1e3e3931fcfcd55a796a44c643e8596ff6566d68f09b87bbc"
 
 [[package]]
 name = "cookie"
@@ -974,6 +1003,7 @@ dependencies = [
  "r2d2",
  "r2d2_sqlite",
  "rusqlite",
+ "rust-argon2",
  "serde",
  "serde_json",
  "tera",
@@ -1005,6 +1035,14 @@ dependencies = [
  "slab",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "hash-password"
+version = "0.1.0"
+dependencies = [
+ "base64 0.11.0",
+ "rust-argon2",
 ]
 
 [[package]]
@@ -1675,6 +1713,18 @@ dependencies = [
  "lru-cache",
  "memchr",
  "time",
+]
+
+[[package]]
+name = "rust-argon2"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13d93898abbc08f4122732299b5cc3e81052c18c6218045eba4a80e02a086a42"
+dependencies = [
+ "base64 0.11.0",
+ "blake2b_simd",
+ "constant_time_eq",
+ "crossbeam-utils",
 ]
 
 [[package]]

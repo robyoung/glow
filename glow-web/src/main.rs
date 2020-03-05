@@ -16,7 +16,9 @@ async fn main() -> std::io::Result<()> {
 
     let db_path = std::env::var("DB_PATH").expect("DB_PATH is required");
     let app_token = std::env::var("APP_TOKEN").expect("APP_TOKEN is required");
-    let app_password = std::env::var("APP_PASSWORD").expect("APP_PASSWORD is required");
+    let app_password =
+        base64::decode(&std::env::var("APP_PASSWORD").expect("APP_PASSWORD is required"))
+            .expect("APP_PASSWORD is not valid base64");
     let cookie_key =
         base64::decode(&std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET is required"))
             .expect("COOKIE_SECRET is not valid base64");
@@ -41,7 +43,7 @@ async fn main() -> std::io::Result<()> {
             )
             .data(AppState {
                 token: app_token,
-                password: app_password,
+                password: std::str::from_utf8(&app_password).unwrap().to_string(),
             })
             .data(pool.clone())
             .data(tera)
