@@ -473,71 +473,101 @@ mod tests {
 
     #[test]
     fn get_blinkt_brightness_when_off() {
-        assert_eq!(get_blinkt_brightness(&[
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_ORANGE,
-        ], 0.005), [0.0; 8]);
+        assert_eq!(
+            get_blinkt_brightness(
+                &[
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                ],
+                0.005
+            ),
+            [0.0; 8]
+        );
     }
 
     #[test]
     fn get_blinkt_brightness_when_two_leds() {
-        assert_eq!(get_blinkt_brightness(&[
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_ORANGE,
-            COLOUR_ORANGE,
-        ], 0.01), [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0]);
+        assert_eq!(
+            get_blinkt_brightness(
+                &[
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                ],
+                0.01
+            ),
+            [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.0]
+        );
     }
 
     #[test]
     fn get_blinkt_brightness_when_three_leds() {
-        assert_eq!(get_blinkt_brightness(&[
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_ORANGE,
-            COLOUR_ORANGE,
-        ], 0.02), [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04]);
+        assert_eq!(
+            get_blinkt_brightness(
+                &[
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                ],
+                0.02
+            ),
+            [0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04]
+        );
     }
 
     #[test]
     fn get_blinkt_brightness_when_four_leds() {
-        assert_eq!(get_blinkt_brightness(&[
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_ORANGE,
-            COLOUR_ORANGE,
-        ], 0.03), [0.04, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04, 0.04]);
+        assert_eq!(
+            get_blinkt_brightness(
+                &[
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                ],
+                0.03
+            ),
+            [0.04, 0.0, 0.0, 0.0, 0.0, 0.04, 0.04, 0.04]
+        );
     }
 
     #[test]
     fn get_blinkt_brightness_when_on() {
-        assert_eq!(get_blinkt_brightness(&[
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_BLUE,
-            COLOUR_ORANGE,
-            COLOUR_ORANGE,
-        ], 0.04), [0.04; 8]);
+        assert_eq!(
+            get_blinkt_brightness(
+                &[
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                ],
+                0.04
+            ),
+            [0.04; 8]
+        );
     }
 }

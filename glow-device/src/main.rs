@@ -11,7 +11,7 @@ use glow_device::leds::{
     BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED, COLOUR_SALMON,
 };
 use glow_device::{EnvironmentSensor, VibrationSensor};
-use glow_device::{LEDBrightnessHandler, LEDHandler, WebHookHandler, WebEventHandler};
+use glow_device::{LEDBrightnessHandler, LEDHandler, WebEventHandler, WebHookHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
@@ -52,9 +52,14 @@ fn main() -> Result<(), String> {
         handlers.push(Box::new(WebHookHandler::new(webhook_url)));
     }
 
-    if let (Ok(web_event_url), Ok(web_event_token)) = (env::var("WEB_EVENT_URL"), env::var("WEB_EVENT_TOKEN")) {
+    if let (Ok(web_event_url), Ok(web_event_token)) =
+        (env::var("WEB_EVENT_URL"), env::var("WEB_EVENT_TOKEN"))
+    {
         info!("Adding web event handler");
-        handlers.push(Box::new(WebEventHandler::new(web_event_url, web_event_token)));
+        handlers.push(Box::new(WebEventHandler::new(
+            web_event_url,
+            web_event_token,
+        )));
     }
 
     run_loop(handlers);
