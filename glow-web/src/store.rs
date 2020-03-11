@@ -44,7 +44,7 @@ fn migrate_db(pool: &Pool<SqliteConnectionManager>) {
     )
     .expect("Cannot create environment_measurements table");
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS environment_measurements_stamp ON environment_measurements (stamp);", 
+        "CREATE INDEX IF NOT EXISTS environment_measurements_stamp ON environment_measurements (stamp);",
         params![],
     )
     .expect("Cannot create events.stamp index");
@@ -76,9 +76,10 @@ pub(crate) fn insert_event(
 
 pub(crate) fn get_latest_events(
     conn: &PooledConnection<SqliteConnectionManager>,
+    limit: u32,
 ) -> Result<Vec<Event>> {
-    conn.prepare("SELECT stamp, message FROM events ORDER BY stamp DESC LIMIT 20")?
-        .query(NO_PARAMS)?
+    conn.prepare("SELECT stamp, message FROM events ORDER BY stamp DESC LIMIT ?")?
+        .query(&[limit])?
         .map(parse_event_row)
         .collect()
 }
@@ -95,13 +96,8 @@ pub(crate) fn insert_measurement(
 }
 
 pub(crate) fn get_latest_event(conn: &PooledConnection<SqliteConnectionManager>) -> Option<Event> {
-    let result = conn.query_row(
-        "SELECT stamp, message FROM events ORDER BY stamp DESC LIMIT 1",
-        NO_PARAMS,
-        parse_event_row,
-    );
-    match result {
-        Ok(event) => Some(event),
+    match get_latest_events(conn, 1) {
+        Ok(mut events) => events.pop(),
         _ => None,
     }
 }

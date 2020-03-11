@@ -20,6 +20,20 @@
     </div>
   </div>
   {% endif %}
+
+  {% if events %}
+  <div class="col s12 m6 l6">
+    <ul class="collection blue-grey darken-2">
+      {% for event in events %}
+      <li class="collection-item avatar blue-grey darken-2">
+        <i class="material-icons circle {{ event.icon_colour }}">{{ event.icon }}</i>
+        <span class="title">{{ event.title }}</span>
+        <p>{{ event.detail }}</p>
+        <p class="grey-text">{{ event.stamp }}</p>
+      </li>
+      {% endfor %}
+  </div>
+  {% endif %}
 </div>
 
 <div class="row">

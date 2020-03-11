@@ -1,3 +1,5 @@
+use std::fmt;
+
 use chrono::{offset::Utc, DateTime};
 use serde::{Deserialize, Serialize};
 
@@ -51,10 +53,43 @@ pub enum Message {
     Stop,
 }
 
+impl Message {
+    pub fn title(&self) -> String {
+        match self {
+            Message::Environment(_) => String::from("Environment event"),
+            Message::Tap(_) => String::from("Tap event"),
+            Message::TPLink(_) => String::from("TP-Link event"),
+            Message::LED(_) => String::from("LED event"),
+            Message::Stop => String::from("Stop event"),
+        }
+    }
+}
+
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Message::Environment(event) => write!(f, "{}", event),
+            Message::Tap(event) => write!(f, "{}", event),
+            Message::TPLink(event) => write!(f, "{}", event),
+            Message::LED(event) => write!(f, "{}", event),
+            Message::Stop => write!(f, "stop"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum EnvironmentEvent {
     Measurement(Measurement),
     Failure,
+}
+
+impl fmt::Display for EnvironmentEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EnvironmentEvent::Measurement(measurement) => write!(f, "temperature: {}°C humidity: {}%", measurement.temperature, measurement.humidity),
+            EnvironmentEvent::Failure => write!(f, "failure"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -62,9 +97,21 @@ pub enum TapEvent {
     SingleTap,
 }
 
+impl fmt::Display for TapEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "single tap")
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TPLinkEvent {
     ListDevices,
+}
+
+impl fmt::Display for TPLinkEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "list devices")
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
@@ -73,6 +120,17 @@ pub enum LEDEvent {
     UpdateBrightness,
     Party,
     Update,
+}
+
+impl fmt::Display for LEDEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LEDEvent::Brightness(brightness) => write!(f, "set brightness to {}", brightness),
+            LEDEvent::UpdateBrightness => write!(f, "update brightness"),
+            LEDEvent::Party => write!(f, "party mode!"),
+            LEDEvent::Update => write!(f, "update LEDs"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]

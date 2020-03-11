@@ -1,4 +1,7 @@
 use chrono::{offset::Utc, DateTime};
+use serde::{Deserialize, Serialize};
+
+use glow_events::{Event, Message};
 
 pub(crate) fn format_time_since(now: DateTime<Utc>, stamp: DateTime<Utc>) -> String {
     let duration = now.signed_duration_since(stamp);
@@ -32,6 +35,48 @@ pub(crate) fn format_time_since(now: DateTime<Utc>, stamp: DateTime<Utc>) -> Str
     }
 
     parts.as_slice().join(", ")
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub(crate) struct EventSummary {
+    pub icon: String,
+    pub icon_colour: String,
+    pub stamp: String,
+    pub title: String,
+    pub detail: String,
+}
+
+impl From<&Event> for EventSummary {
+    fn from(event: &Event) -> Self {
+        let mut summary = EventSummary::default();
+
+        summary.stamp = format!("{}", event.stamp().format("%F %T"));
+        summary.title = event.message().title();
+        summary.icon = get_message_icon(event.message());
+        summary.icon_colour = get_message_icon_colour(event.message());
+        summary.detail = format!("{}", event.message());
+        summary
+    }
+}
+
+fn get_message_icon(message: &Message) -> String {
+    match message {
+        Message::Environment(_) => "eco",
+        Message::Tap(_) => "touch_app",
+        Message::TPLink(_) => "settings_remote",
+        Message::LED(_) => "brightness_4",
+        Message::Stop => "stop",
+    }.to_string()
+}
+
+fn get_message_icon_colour(message: &Message) -> String {
+    match message {
+        Message::Environment(_) => "green",
+        Message::Tap(_) => "teal",
+        Message::TPLink(_) => "amber",
+        Message::LED(_) => "light-blue",
+        Message::Stop => "red",
+    }.to_string()
 }
 
 #[cfg(test)]

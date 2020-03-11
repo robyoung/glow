@@ -9,7 +9,7 @@ use serde::Deserialize;
 use glow_events::{EnvironmentEvent, Event, Message};
 
 use crate::{found, store, AppState};
-use crate::formatting::format_time_since;
+use crate::formatting::{format_time_since, EventSummary};
 
 fn render(
     tmpl: web::Data<tera::Tera>,
@@ -36,6 +36,11 @@ pub async fn index(
                 "measurement_age",
                 &format_time_since(Utc::now(), event.stamp()),
             );
+            let events = match store::get_latest_events(&conn, 20) {
+                Ok(events) => events,
+                Err(_) => Vec::new(),
+            };
+            ctx.insert("events", &events.iter().map(EventSummary::from).collect::<Vec<EventSummary>>());
         }
     }
     render(tmpl, "index.html", Some(&ctx))
@@ -87,5 +92,5 @@ pub async fn store_events(
 pub async fn list_events(pool: web::Data<Pool<SqliteConnectionManager>>) -> impl Responder {
     let conn = pool.get().unwrap();
 
-    HttpResponse::Ok().json(store::get_latest_events(&conn).unwrap())
+    HttpResponse::Ok().json(store::get_latest_events(&conn, 20).unwrap())
 }
