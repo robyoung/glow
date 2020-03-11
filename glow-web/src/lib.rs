@@ -16,6 +16,7 @@ use actix_web_httpauth::{
 use futures::future::{ok, Either, Ready};
 
 mod monitor;
+mod formatting;
 pub mod routes;
 pub mod store;
 
