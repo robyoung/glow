@@ -5,6 +5,7 @@ use chrono::offset::Utc;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::Deserialize;
+use serde_json::json;
 
 use glow_events::{EnvironmentEvent, Event, Message};
 
@@ -20,6 +21,10 @@ fn render(
         .render(template_name, context.unwrap_or(&tera::Context::new()))
         .map_err(|_| error::ErrorInternalServerError("template errror"))?;
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
+}
+
+pub async fn status() -> impl Responder {
+    HttpResponse::Ok().json(json!({"status": "ok"}))
 }
 
 pub async fn index(

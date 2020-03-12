@@ -3,15 +3,9 @@
 
 {% block content %}
 <div class="row">
-  <div class="col s12">
-    <h1>Glow</h1>
-  </div>
-</div>
-
-<div class="row">
   {% if measurement %}
   <div class="col s12 m6 l3">
-    <div class="card blue-grey darken-2 measurement">
+    <div class="card blue-grey darken-4 measurement">
       <div class="card-content white-text center-align">
         <span class="card-title headline-figure">{{ measurement.temperature }}&deg;C</span>
         <p>collected {{ measurement_age }} ago</p>
@@ -23,9 +17,9 @@
 
   {% if events %}
   <div class="col s12 m6 l6">
-    <ul class="collection blue-grey darken-2">
+    <ul class="collection blue-grey darken-4">
       {% for event in events %}
-      <li class="collection-item avatar blue-grey darken-2">
+      <li class="collection-item avatar blue-grey darken-4">
         <i class="material-icons circle {{ event.icon_colour }}">{{ event.icon }}</i>
         <span class="title">{{ event.title }}</span>
         <p>{{ event.detail }}</p>

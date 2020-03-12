@@ -3,7 +3,6 @@ extern crate blinkt;
 extern crate chrono;
 #[macro_use]
 extern crate log;
-#[macro_use]
 extern crate ureq;
 extern crate glow_events;
 
@@ -21,6 +20,7 @@ use rppal::{
     hal::Delay,
     i2c::I2c,
 };
+use serde_json::json;
 
 use glow_events::{EnvironmentEvent, Event, LEDEvent, Measurement, Message, TapEvent};
 
@@ -338,7 +338,6 @@ impl EventHandler for WebEventHandler {
                 // read all events off the queue
                 let events = receiver.try_iter().collect::<Vec<Event>>();
                 let mut no_events = events.is_empty();
-                info!("received {:?} events in web event thread", events.len());
 
                 // make request to server
                 let resp = client
@@ -364,7 +363,7 @@ impl EventHandler for WebEventHandler {
                         error!("received invalid json");
                     }
                 } else {
-                    error!("Failed to send events");
+                    error!("Failed to send {} events: {}", events.len(), resp.status());
                 }
 
                 // sleep for poll interval
@@ -375,7 +374,6 @@ impl EventHandler for WebEventHandler {
     }
 
     fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
-        info!("handling event in web event handler method");
         if let Err(err) = self.sender.send(event.clone()) {
             error!("failed to send event to remote worker: {:?}", err);
         }

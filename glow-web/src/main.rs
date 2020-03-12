@@ -22,6 +22,12 @@ async fn main() -> std::io::Result<()> {
     let cookie_key =
         base64::decode(&std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET is required"))
             .expect("COOKIE_SECRET is not valid base64");
+    let mut tera = Tera::new("/dev/null/*").unwrap();
+    tera.add_raw_templates(vec![
+        ("login.html", include_str!("../templates/login.html")),
+        ("index.html", include_str!("../templates/index.html")),
+        ("base.html", include_str!("../templates/base.html")),
+    ]).unwrap();
 
     let pool = store::setup_db(db_path);
 
@@ -31,7 +37,7 @@ async fn main() -> std::io::Result<()> {
         let app_token = app_token.clone();
         let app_password = app_password.clone();
         let cookie_key = cookie_key.clone();
-        let tera = Tera::new(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/**/*")).unwrap();
+        let tera = tera.clone();
 
         App::new()
             .wrap(Logger::default())
@@ -57,6 +63,10 @@ async fn main() -> std::io::Result<()> {
                     ),
             )
             .service(
+                web::resource("/status")
+                    .route(web::get().to(routes::status)),
+            )
+            .service(
                 web::resource("/login")
                     .route(web::get().to(routes::login))
                     .route(web::post().to(routes::do_login)),
@@ -68,7 +78,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/logout", web::get().to(routes::logout)),
             )
     })
-    .bind("0.0.0.0:8088")?
+    .bind("127.0.0.1:8088")?
     .run()
     .await
 }
