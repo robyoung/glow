@@ -6,6 +6,8 @@ PACKAGE="glow-device"
 TRIPPLE="arm-unknown-linux-musleabihf"
 TARGET_DIR="./target/${TRIPPLE}/release"
 TARGET="${TARGET_DIR}/${PACKAGE}"
+SERVICE_NAME="glow.service"
+SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
 
 fail() {
   >&2 echo $1
@@ -27,14 +29,13 @@ docker \
   $image \
   /usr/local/arm-linux-musleabihf/bin/strip /usr/src/glow/${TARGET}
 
-md5sum --quiet -c ${TARGET}.md5sum && {
-  >&2 echo "No change to release binary"
-  exit 1
-}
-ssh $BOBNET_GLOW_DEPLOY_TARGET sudo systemctl stop glow.service
+md5sum --quiet -c ${TARGET}.md5sum && fail "No change to release binary"
+ssh $BOBNET_GLOW_DEPLOY_TARGET sudo systemctl stop $SERVICE_NAME
 scp ${TARGET} $BOBNET_GLOW_DEPLOY_TARGET:
 
-cat glow.service | envsubst | ssh $BOBNET_GLOW_DEPLOY_TARGET "cat >/tmp/glow.service"
-ssh $BOBNET_GLOW_DEPLOY_TARGET "cmp /tmp/glow.service /etc/systemd/system/glow.service || { sudo mv /tmp/glow.service /etc/systemd/system/glow.service && sudo systemctl daemon-reload ; }"
+cat deploy/glow-device.service | \
+  envsubst | \
+  ssh $BOBNET_GLOW_DEPLOY_TARGET "cat >/tmp/$SERVICE_NAME"
+ssh $BOBNET_GLOW_DEPLOY_TARGET "cmp /tmp/$SERVICE_NAME $SERVICE_PATH || { sudo mv /tmp/$SERVICE_NAME $SERVICE_PATH && sudo systemctl daemon-reload ; }"
 ssh $BOBNET_GLOW_DEPLOY_TARGET sudo systemctl start glow.service
 md5sum ${TARGET} > ${TARGET}.md5sum
