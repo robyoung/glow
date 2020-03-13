@@ -33,7 +33,7 @@ const VIBRATION_SENSOR_INTERRUPT_PIN: u8 = 17;
 const VIBRATION_SENSOR_INTERRUPT_BOUNCE: u128 = 300;
 const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 3;
 const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
-const ENVIRONMENT_SENSOR_SLEEP: u64 = 5;
+const ENVIRONMENT_SENSOR_SLEEP: u64 = 15;
 
 impl EventHandler for EnvironmentSensor {
     fn start(&mut self, sender: SyncSender<Event>) {
