@@ -11,7 +11,7 @@ use glow_device::leds::{
     BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED, COLOUR_SALMON,
 };
 use glow_device::{EnvironmentSensor, VibrationSensor};
-use glow_device::{LEDBrightnessHandler, LEDHandler, WebEventHandler};
+use glow_device::{LEDHandler, WebEventHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
@@ -28,13 +28,11 @@ fn main() -> Result<(), String> {
         ],
     )?;
     let leds = BlinktLEDs::new();
-    let brightness_handler = LEDBrightnessHandler::new();
     let led_handler = LEDHandler::new(leds, colour_range);
 
     let mut handlers: Vec<Box<dyn EventHandler>> = vec![
         Box::new(EnvironmentSensor {}),
         Box::new(VibrationSensor {}),
-        Box::new(brightness_handler),
         Box::new(led_handler),
     ];
 

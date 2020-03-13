@@ -167,36 +167,6 @@ impl EventHandler for PrintMeasurementHandler {
     }
 }
 
-pub struct LEDBrightnessHandler {
-    brightness: f32,
-}
-
-impl LEDBrightnessHandler {
-    pub fn new() -> Self {
-        Self {
-            brightness: Brightness::default().value(),
-        }
-    }
-}
-
-impl EventHandler for LEDBrightnessHandler {
-    fn handle(&mut self, event: &Event, sender: &SyncSender<Event>) {
-        match event.message() {
-            Message::LED(LEDEvent::Brightness(brightness)) => if *brightness != self.brightness {
-                self.brightness = *brightness;
-            }
-            Message::Tap(TapEvent::SingleTap) => {
-                sender
-                    .send(Event::new(Message::LED(LEDEvent::Brightness(
-                        Brightness::next_from(self.brightness).value(),
-                    ))))
-                    .unwrap();
-            }
-            _ => {}
-        }
-    }
-}
-
 pub struct LEDHandler {
     leds: Box<dyn LEDs>,
     colour_range: ColourRange,
