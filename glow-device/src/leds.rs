@@ -16,6 +16,13 @@ pub enum Brightness {
     Off,
 }
 
+impl Default for Brightness {
+    fn default() -> Self {
+        Self::Dim
+    }
+}
+
+
 impl Brightness {
     pub(crate) fn next_from(brightness: f32) -> Self {
         if brightness < Brightness::Dim.value() {
@@ -29,7 +36,7 @@ impl Brightness {
 
     pub(crate) fn value(&self) -> f32 {
         match self {
-            Brightness::Dim => 0.05,
+            Brightness::Dim => 0.01,
             Brightness::Bright => 0.5,
             Brightness::Off => 0.0,
         }

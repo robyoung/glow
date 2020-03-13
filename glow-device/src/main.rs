@@ -28,9 +28,7 @@ fn main() -> Result<(), String> {
         ],
     )?;
     let leds = BlinktLEDs::new();
-    let brightness_handler = LEDBrightnessHandler::new(
-        &"https://raw.githubusercontent.com/robyoung/data/master/glow-brightness",
-    );
+    let brightness_handler = LEDBrightnessHandler::new();
     let led_handler = LEDHandler::new(leds, colour_range);
 
     let mut handlers: Vec<Box<dyn EventHandler>> = vec![
