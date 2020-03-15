@@ -29,7 +29,7 @@ async fn main() -> std::io::Result<()> {
         ("base.html", include_str!("../templates/base.html")),
     ]).unwrap();
 
-    let pool = store::setup_db(db_path);
+    let pool = store::setup_db(&db_path);
 
     EventsMonitor::new(pool.clone()).start();
 

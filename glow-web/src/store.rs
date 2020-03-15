@@ -3,10 +3,11 @@ use fallible_iterator::FallibleIterator;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::{self, SqliteConnectionManager};
 use rusqlite::{types::FromSqlError, Result, Row, NO_PARAMS};
+use rand::Rng;
 
 use glow_events::{EnvironmentEvent, Event, Measurement, Message};
 
-pub fn setup_db(db_path: String) -> Pool<SqliteConnectionManager> {
+pub fn setup_db(db_path: &str) -> Pool<SqliteConnectionManager> {
     let pool = Pool::new(SqliteConnectionManager::file(db_path)).unwrap();
     migrate_db(&pool);
     pool
@@ -54,17 +55,23 @@ fn migrate_db(pool: &Pool<SqliteConnectionManager>) {
         CREATE TABLE IF NOT EXISTS event_queue (
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             stamp DATETIME,
-            message TEXT
+            message TEXT,
+            group_token INT DEFAULT 0
         );
         "#,
         params![],
     )
     .expect("Cannot create event_queue table");
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS event_queue_created_at ON event_queue (stamp);",
+        "CREATE INDEX IF NOT EXISTS event_queue_created_at ON event_queue (stamp, group_token);",
         params![],
     )
     .expect("Cannot create events.stamp index");
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS event_queue_group_token ON event_queue (group_token);",
+        params![],
+    )
+    .expect("Cannot create events.group_token index");
 }
 
 pub(crate) fn insert_event(
@@ -142,11 +149,16 @@ pub(crate) fn queue_event(
 }
 
 pub(crate) fn dequeue_events(conn: &PooledConnection<SqliteConnectionManager>) -> Result<Vec<Event>> {
-    let events = conn.prepare("SELECT stamp, message FROM event_queue ORDER BY stamp")?
-        .query(NO_PARAMS)?
+    let token: u32 = rand::thread_rng().gen_range(2, std::u32::MAX);
+    conn.execute(
+        "UPDATE event_queue SET group_token = ?1, stamp = ?2 WHERE group_token = 0",
+        params![token, Utc::now()]
+    )?;
+    let events = conn.prepare("SELECT stamp, message FROM event_queue WHERE group_token = ?1 ORDER BY stamp")?
+        .query(params![token])?
         .map(parse_event_row)
         .collect()?;
-    conn.execute("DELETE FROM event_queue", NO_PARAMS)?;
+    conn.execute("UPDATE event_queue SET group_token = 1 WHERE group_token = ?1", params![token])?;
     Ok(events)
 }
 
@@ -163,4 +175,31 @@ fn insert_event_to(
             serde_json::to_string(event.message()).unwrap()
         ],
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dequeue_events_removes_events() {
+        {
+            // arrange
+            let pool = setup_db(&"./test.db");
+            let conn = pool.get().unwrap();
+            let event = Event::new(Message::Stop);
+
+            // act
+            queue_event(&conn, &event).unwrap();
+            queue_event(&conn, &event).unwrap();
+
+            let events1 = dequeue_events(&conn).unwrap();
+            let events2 = dequeue_events(&conn).unwrap();
+
+            // assert
+            assert_eq!(events1.len(), 2);
+            assert_eq!(events2.len(), 0);
+        }
+        std::fs::remove_file("./test.db").unwrap();
+    }
 }
