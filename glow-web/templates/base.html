@@ -23,5 +23,14 @@ ul.collection li.collection-item span.title {
   <div id="content" class="container">
     {% block content %}{% endblock content %}
   </div>
+  <script type="text/javascript" src="/static/pulltorefresh.js"></script>
+  <script type="text/javascript">
+    const ptr = PullToRefresh.init({
+      mainElement: 'body',
+      onRefresh() {
+        window.location.reload();
+      }
+    });
+  </script>
 </body>
 </html>

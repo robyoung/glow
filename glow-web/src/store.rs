@@ -141,6 +141,15 @@ pub(crate) fn queue_event(
     insert_event_to(&"event_queue", conn, event)
 }
 
+pub(crate) fn dequeue_events(conn: &PooledConnection<SqliteConnectionManager>) -> Result<Vec<Event>> {
+    let events = conn.prepare("SELECT stamp, message FROM event_queue ORDER BY stamp")?
+        .query(NO_PARAMS)?
+        .map(parse_event_row)
+        .collect()?;
+    conn.execute("DELETE FROM event_queue", NO_PARAMS)?;
+    Ok(events)
+}
+
 fn insert_event_to(
     table: &str,
     conn: &PooledConnection<SqliteConnectionManager>,

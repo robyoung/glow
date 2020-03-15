@@ -20,7 +20,6 @@ use rppal::{
     hal::Delay,
     i2c::I2c,
 };
-use serde_json::json;
 
 use glow_events::{EnvironmentEvent, Event, LEDEvent, Measurement, Message, TapEvent};
 
@@ -34,6 +33,7 @@ const VIBRATION_SENSOR_INTERRUPT_BOUNCE: u128 = 300;
 const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 3;
 const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
 const ENVIRONMENT_SENSOR_SLEEP: u64 = 15;
+const ENVIRONMENT_SENSOR_MAX_SKIP: u8 = 10;
 
 impl EventHandler for EnvironmentSensor {
     fn start(&mut self, sender: SyncSender<Event>) {
@@ -43,6 +43,7 @@ impl EventHandler for EnvironmentSensor {
 
             let mut am2320 = AM2320::new(device, delay);
             let mut previous_data: Option<Measurement> = None;
+            let mut num_skipped: u8 = 0;
 
             loop {
                 let measurement = read_am2320(&mut am2320);
@@ -53,7 +54,8 @@ impl EventHandler for EnvironmentSensor {
                     true
                 };
 
-                if changed {
+                if changed || num_skipped > ENVIRONMENT_SENSOR_MAX_SKIP {
+                    num_skipped = 0;
                     debug!(
                         "Sending changed data: {:?} {:?}",
                         measurement, previous_data
@@ -66,6 +68,7 @@ impl EventHandler for EnvironmentSensor {
                         warn!("Failed to write sensor data to channel: {:?}", err);
                     }
                 } else {
+                    num_skipped += 1;
                     debug!(
                         "Skipping unchanged data: {:?} {:?}",
                         measurement, previous_data
@@ -171,7 +174,7 @@ pub struct LEDHandler {
     leds: Box<dyn LEDs>,
     colour_range: ColourRange,
     colours: Vec<Colour>,
-    brightness: Option<f32>,
+    brightness: f32,
 }
 
 impl LEDHandler {
@@ -181,7 +184,7 @@ impl LEDHandler {
             leds: Box::new(leds),
             colour_range,
             colours,
-            brightness: None,
+            brightness: Brightness::default().value(),
         }
     }
 }
@@ -191,12 +194,18 @@ impl EventHandler for LEDHandler {
         let message = event.message();
         match message {
             Message::Environment(EnvironmentEvent::Measurement(measurement)) => {
-                self.colours = self.colour_range.get_pixels(measurement.temperature as f32);
-                sender
-                    .send(Event::new(Message::LED(LEDEvent::Update)))
-                    .unwrap();
+                let colours = self.colour_range.get_pixels(measurement.temperature as f32);
+                if colours.iter().zip(&self.colours).any(|(&a, &b)| a != b) {
+                    self.colours = colours;
+                    sender
+                        .send(Event::new(Message::LED(LEDEvent::Update)))
+                        .unwrap();
+                } else {
+                    debug!("Not updating unchanged LEDs");
+                }
             }
             Message::Tap(TapEvent::SingleTap) => {
+                self.brightness = Brightness::next_from(self.brightness).value();
                 sender
                     .send(Event::new(Message::LED(LEDEvent::Party)))
                     .unwrap();
@@ -210,14 +219,15 @@ impl EventHandler for LEDHandler {
                 }
             }
             Message::LED(LEDEvent::Update) => {
-                if let Some(brightness) = self.brightness {
-                    if let Err(err) = self.leds.show(&self.colours, brightness) {
-                        error!("show error: {}", err);
-                    }
+                if let Err(err) = self.leds.show(&self.colours, self.brightness) {
+                    error!("show error: {}", err);
                 }
             }
             Message::LED(LEDEvent::Brightness(brightness)) => {
-                self.brightness = Some(*brightness);
+                self.brightness = *brightness;
+                sender
+                    .send(Event::new(Message::LED(LEDEvent::Update)))
+                    .unwrap();
             }
             _ => {}
         }
@@ -269,6 +279,9 @@ impl EventHandler for WebEventHandler {
                     if let Ok(data) = resp.into_json() {
                         if let Ok(events) = serde_json::from_value::<Vec<Event>>(data) {
                             no_events = no_events && events.is_empty();
+                            if events.len() > 0 {
+                                info!("received {} events from remote", events.len());
+                            }
                             for event in events {
                                 if let Err(err) = sender.send(event) {
                                     error!("failed to send remote error to bus {:?}", err);

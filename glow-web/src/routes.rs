@@ -7,10 +7,10 @@ use r2d2_sqlite::SqliteConnectionManager;
 use serde::Deserialize;
 use serde_json::json;
 
-use glow_events::{EnvironmentEvent, Event, Message};
+use glow_events::{EnvironmentEvent, Event, LEDEvent, Message};
 
-use crate::{found, store, AppState};
 use crate::formatting::{format_time_since, EventSummary};
+use crate::{found, store, AppState};
 
 fn render(
     tmpl: web::Data<tera::Tera>,
@@ -45,10 +45,36 @@ pub async fn index(
                 Ok(events) => events,
                 Err(_) => Vec::new(),
             };
-            ctx.insert("events", &events.iter().map(EventSummary::from).collect::<Vec<EventSummary>>());
+            ctx.insert(
+                "events",
+                &events
+                    .iter()
+                    .map(EventSummary::from)
+                    .collect::<Vec<EventSummary>>(),
+            );
         }
     }
     render(tmpl, "index.html", Some(&ctx))
+}
+
+#[derive(Deserialize)]
+pub struct SetBrightnessForm {
+    brightness: u32,
+}
+
+pub async fn set_brightness(
+    form: web::Form<SetBrightnessForm>,
+    pool: web::Data<Pool<SqliteConnectionManager>>,
+) -> Result<HttpResponse, Error> {
+    let conn = pool
+        .get()
+        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
+    let event = Event::new(Message::LED(LEDEvent::Brightness(
+        form.brightness as f32 / 100.0,
+    )));
+    store::queue_event(&conn, &event)
+        .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
+    Ok(found("/"))
 }
 
 pub async fn login(tmpl: web::Data<tera::Tera>) -> impl Responder {
@@ -90,8 +116,9 @@ pub async fn store_events(
             store::insert_measurement(&conn, event.stamp(), measurement).unwrap();
         }
     }
-    let return_events: Vec<Event> = vec![];
-    HttpResponse::Ok().json(return_events)
+    store::dequeue_events(&conn)
+        .map(|return_events| HttpResponse::Ok().json(return_events))
+        .map_err(|err| error::ErrorInternalServerError(format!("{}", err)))
 }
 
 pub async fn list_events(pool: web::Data<Pool<SqliteConnectionManager>>) -> impl Responder {

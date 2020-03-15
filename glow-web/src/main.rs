@@ -75,7 +75,8 @@ async fn main() -> std::io::Result<()> {
                 web::scope("/")
                     .wrap(CheckLogin)
                     .route("", web::get().to(routes::index))
-                    .route("/logout", web::get().to(routes::logout)),
+                    .route("/logout", web::get().to(routes::logout))
+                    .route("/brightness", web::post().to(routes::set_brightness)),
             )
     })
     .bind("127.0.0.1:8088")?

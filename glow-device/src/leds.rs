@@ -231,7 +231,7 @@ impl BlinktLEDs {
         let result = match &self.current {
             None => true,
             Some(current) => {
-                if (current.1 - brightness).abs() < f32::EPSILON {
+                if (current.1 - brightness).abs() > f32::EPSILON {
                     true
                 } else {
                     colours.iter().zip(current.0.iter()).any(|(&a, &b)| a != b)

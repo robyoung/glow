@@ -15,6 +15,17 @@
   </div>
   {% endif %}
 
+  <div class="col s12 m6 l3">
+    <div class="card blue-grey darken-4 measurement">
+      <div class="card-content white-text center-align">
+        <span class="card-title">set brightness</span>
+        <form action="/brightness" method="post">
+          <input class="white-text" type=number name=brightness min=0 max=100>
+        </form>
+      </div>
+    </div>
+  </div>
+
   {% if events %}
   <div class="col s12 m6 l6">
     <ul class="collection blue-grey darken-4">
