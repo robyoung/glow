@@ -104,13 +104,24 @@ impl fmt::Display for TapEvent {
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct TPLinkDevice {
+    pub name: String
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TPLinkEvent {
     ListDevices,
+    DeviceList(Vec<TPLinkDevice>),
+    RunHeater,
 }
 
 impl fmt::Display for TPLinkEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "list devices")
+        match self {
+            TPLinkEvent::ListDevices => write!(f, "list devices"),
+            TPLinkEvent::DeviceList(devices) => write!(f, "device list: {:?}", devices),
+            TPLinkEvent::RunHeater => write!(f, "run heater"),
+        }
     }
 }
 
@@ -120,6 +131,7 @@ pub enum LEDEvent {
     UpdateBrightness,
     Party,
     Update,
+    LEDsUpdated(Vec<(u8, u8, u8)>),
 }
 
 impl fmt::Display for LEDEvent {
@@ -129,6 +141,7 @@ impl fmt::Display for LEDEvent {
             LEDEvent::UpdateBrightness => write!(f, "update brightness"),
             LEDEvent::Party => write!(f, "party mode!"),
             LEDEvent::Update => write!(f, "update LEDs"),
+            LEDEvent::LEDsUpdated(_) => write!(f, "LEDs updated"),
         }
     }
 }

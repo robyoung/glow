@@ -91,6 +91,22 @@ pub(crate) fn get_latest_events(
         .collect()
 }
 
+pub(crate) fn get_latest_event_like(
+    conn: &PooledConnection<SqliteConnectionManager>,
+    like: &str,
+) -> Result<Option<Event>> {
+    let mut events = conn.prepare("SELECT stamp, message FROM events WHERE message like ? ORDER BY stamp DESC LIMIT 1")?
+        .query(params![like])?
+        .map(parse_event_row)
+        .collect::<Vec<Event>>()?;
+    if events.is_empty() {
+        Ok(None)
+    } else {
+        Ok(events.pop())
+    }
+}
+
+
 pub(crate) fn insert_measurement(
     conn: &PooledConnection<SqliteConnectionManager>,
     stamp: DateTime<Utc>,

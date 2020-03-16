@@ -7,7 +7,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use serde::Deserialize;
 use serde_json::json;
 
-use glow_events::{EnvironmentEvent, Event, LEDEvent, Message};
+use glow_events::{EnvironmentEvent, Event, LEDEvent, Message, TPLinkEvent};
 
 use crate::formatting::{format_time_since, EventSummary};
 use crate::{found, store, AppState};
@@ -30,11 +30,17 @@ pub async fn status() -> impl Responder {
 pub async fn index(
     pool: web::Data<Pool<SqliteConnectionManager>>,
     tmpl: web::Data<tera::Tera>,
+    session: Session,
 ) -> Result<HttpResponse, Error> {
     let conn = pool.get().unwrap();
     let mut ctx = tera::Context::new();
     if let Some(event) = store::get_latest_measurement(&conn) {
+        let flash: Option<String> = session.get("flash").map_err(|_| error::ErrorInternalServerError("invalid flash message"))?;
+        if flash.is_some() {
+            session.remove("flash");
+        }
         ctx.insert("event", &event);
+        ctx.insert("flash", &flash);
         if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
             ctx.insert("measurement", measurement);
             ctx.insert(
@@ -65,6 +71,7 @@ pub struct SetBrightnessForm {
 pub async fn set_brightness(
     form: web::Form<SetBrightnessForm>,
     pool: web::Data<Pool<SqliteConnectionManager>>,
+    session: Session,
 ) -> Result<HttpResponse, Error> {
     let conn = pool
         .get()
@@ -74,8 +81,37 @@ pub async fn set_brightness(
     )));
     store::queue_event(&conn, &event)
         .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
+    session.set("flash", "set brightness event queued")?;
     Ok(found("/"))
 }
+
+pub async fn run_heater(
+    pool: web::Data<Pool<SqliteConnectionManager>>,
+    session: Session,
+) -> Result<HttpResponse, Error> {
+    let conn = pool
+        .get()
+        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
+
+    let latest_event = store::get_latest_event_like(&conn, &r#"{"TPLink":"RunHeater"}"#)
+        .map_err(|_| error::ErrorInternalServerError("failed to get latest heater event"))?;
+    let can_run_heater = if let Some(latest_event) = latest_event {
+        Utc::now().signed_duration_since(latest_event.stamp()).num_minutes() < 5
+    } else {
+        true
+    };
+
+    if can_run_heater {
+        store::queue_event(&conn, &Event::new(Message::TPLink(TPLinkEvent::RunHeater)))
+            .map_err(|_| error::ErrorInternalServerError("failed to run heater event"))?;
+        session.set("flash", "run heater event queued")?;
+    } else {
+        session.set("flash", "cannot queue run heater event")?;
+    }
+
+    Ok(found("/"))
+}
+
 
 pub async fn login(tmpl: web::Data<tera::Tera>) -> impl Responder {
     render(tmpl, "login.html", None)

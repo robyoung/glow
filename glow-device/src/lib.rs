@@ -279,7 +279,7 @@ impl EventHandler for WebEventHandler {
                     if let Ok(data) = resp.into_json() {
                         if let Ok(events) = serde_json::from_value::<Vec<Event>>(data) {
                             no_events = no_events && events.is_empty();
-                            if events.len() > 0 {
+                            if !events.is_empty() {
                                 info!("received {} events from remote", events.len());
                             }
                             for event in events {
