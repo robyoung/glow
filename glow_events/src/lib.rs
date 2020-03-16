@@ -63,6 +63,16 @@ impl Message {
             Message::Stop => String::from("Stop event"),
         }
     }
+
+    pub fn event_type(&self) -> String {
+        match self {
+            Message::Environment(event) => format!("environment.{}", event.event_type()),
+            Message::Tap(event) => format!("tap.{}", event.event_type()),
+            Message::TPLink(event) => format!("tplink.{}", event.event_type()),
+            Message::LED(event) => format!("led.{}", event.event_type()),
+            Message::Stop => String::from("stop"),
+        }
+    }
 }
 
 impl fmt::Display for Message {
@@ -83,6 +93,15 @@ pub enum EnvironmentEvent {
     Failure,
 }
 
+impl EnvironmentEvent {
+    fn event_type(&self) -> String {
+        match self {
+            EnvironmentEvent::Measurement(_) => String::from("measurement"),
+            EnvironmentEvent::Failure => String::from("failure"),
+        }
+    }
+}
+
 impl fmt::Display for EnvironmentEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -95,6 +114,14 @@ impl fmt::Display for EnvironmentEvent {
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum TapEvent {
     SingleTap,
+}
+
+impl TapEvent {
+    fn event_type(&self) -> String {
+        match self {
+            TapEvent::SingleTap => String::from("single-tap"),
+        }
+    }
 }
 
 impl fmt::Display for TapEvent {
@@ -115,6 +142,16 @@ pub enum TPLinkEvent {
     RunHeater,
 }
 
+impl TPLinkEvent {
+    fn event_type(&self) -> String {
+        match self {
+            TPLinkEvent::ListDevices => String::from("list-devices"),
+            TPLinkEvent::DeviceList(_) => String::from("device-list"),
+            TPLinkEvent::RunHeater => String::from("run-heater"),
+        }
+    }
+}
+
 impl fmt::Display for TPLinkEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -132,6 +169,18 @@ pub enum LEDEvent {
     Party,
     Update,
     LEDsUpdated(Vec<(u8, u8, u8)>),
+}
+
+impl LEDEvent {
+    fn event_type(&self) -> String {
+        match self {
+            LEDEvent::Brightness(_) => String::from("brightness"),
+            LEDEvent::UpdateBrightness => String::from("update-brightness"),
+            LEDEvent::Party => String::from("party"),
+            LEDEvent::Update => String::from("update"),
+            LEDEvent::LEDsUpdated(_) => String::from("leds-updated"),
+        }
+    }
 }
 
 impl fmt::Display for LEDEvent {
