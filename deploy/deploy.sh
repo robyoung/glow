@@ -101,6 +101,10 @@ case "$1" in
     DEPLOY_TARGET=$BOBNET_GLOW_DEPLOY_TARGET
     ;;
   both)
+    parallel -k $0 <<EOF
+web
+device
+EOF
     ;;
   *)
     help
