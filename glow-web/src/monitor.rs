@@ -35,7 +35,7 @@ fn is_alarming(conn: &PooledConnection<SqliteConnectionManager>, count: u32) -> 
     match get_latest_event(conn) {
         Some(event) => {
             let elapsed = Utc::now().signed_duration_since(event.stamp());
-            elapsed > chrono::Duration::seconds(30)
+            elapsed > chrono::Duration::minutes(3)
         }
         None => count > 10,
     }
