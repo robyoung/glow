@@ -13,7 +13,7 @@ Environment=COOKIE_SECRET=${GLOW_WEB_COOKIE_SECRET}
 Environment=DB_PATH=/var/lib/glow-web/events.db
 Environment=APP_TOKEN=${GLOW_WEB_APP_TOKEN}
 Environment=APP_PASSWORD=${GLOW_WEB_APP_PASSWORD}
-Environment=RUST_LOG=actix_web=info
+Environment=RUST_LOG=info
 
 [Install]
 WantedBy=multi-user.target

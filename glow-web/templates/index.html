@@ -31,6 +31,19 @@
   <div class="col 212 m6 l3">
     <div class="card blue-grey darken-4 measurement">
       <div class="card-content white-text center-align">
+        <form action="/list-devices" method="post">
+          <button class="btn waves-effect waves-light" type=submit name=action>
+            list devices
+           <i class="material-icons right">devices</i>
+        </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col 212 m6 l3">
+    <div class="card blue-grey darken-4 measurement">
+      <div class="card-content white-text center-align">
         <form action="/run-heater" method="post">
           <button class="btn waves-effect waves-light" type=submit name=action>
             run heater
@@ -67,6 +80,12 @@
               <div style="background-color:{{ colour }}"></div>
             {% endfor %}
           </div>
+        {% elif event.event_type == "tplink.device-list" %}
+          <ul>
+            {% for device in event.extra["devices"] %}
+              <li>{{ device["name"] }}</li>
+            {% endfor %}
+          </ul>
         {% endif %}
       </li>
       {% endfor %}

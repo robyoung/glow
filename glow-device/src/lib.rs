@@ -1,13 +1,6 @@
-extern crate am2320;
-extern crate blinkt;
-extern crate chrono;
-#[macro_use]
-extern crate log;
-extern crate glow_events;
-extern crate ureq;
-
 pub mod events;
 pub mod leds;
+pub mod tplink;
 
 use std::{
     sync::mpsc::{sync_channel, Receiver, SyncSender},
@@ -15,6 +8,7 @@ use std::{
 };
 
 use am2320::AM2320;
+use log::{debug, error, info, warn};
 use rppal::{
     gpio::{Gpio, Trigger},
     hal::Delay,

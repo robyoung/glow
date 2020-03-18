@@ -87,6 +87,25 @@ pub async fn set_brightness(
     Ok(found("/"))
 }
 
+pub async fn list_devices(
+    pool: web::Data<Pool<SqliteConnectionManager>>,
+    session: Session,
+) -> Result<HttpResponse, Error> {
+    let conn = pool
+        .get()
+        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
+
+    store::queue_event(
+        &conn,
+        &Event::new(Message::TPLink(TPLinkEvent::ListDevices)),
+    )
+    .map_err(|_| error::ErrorInternalServerError("failed to request device list"))?;
+
+    session.set("flash", "list devices request sent")?;
+
+    Ok(found("/"))
+}
+
 pub async fn run_heater(
     pool: web::Data<Pool<SqliteConnectionManager>>,
     session: Session,
@@ -101,7 +120,7 @@ pub async fn run_heater(
         Utc::now()
             .signed_duration_since(latest_event.stamp())
             .num_minutes()
-            < 5
+            > 5
     } else {
         true
     };

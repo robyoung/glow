@@ -6,12 +6,15 @@ extern crate log;
 
 use std::env;
 
-use glow_device::events::{run_loop, EventHandler};
-use glow_device::leds::{
-    BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED, COLOUR_SALMON,
+use glow_device::{
+    events::{run_loop, EventHandler},
+    leds::{
+        BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED,
+        COLOUR_SALMON,
+    },
+    tplink::TPLinkHandler,
+    EnvironmentSensor, LEDHandler, VibrationSensor, WebEventHandler,
 };
-use glow_device::{EnvironmentSensor, VibrationSensor};
-use glow_device::{LEDHandler, WebEventHandler};
 
 fn main() -> Result<(), String> {
     env_logger::init();
@@ -34,6 +37,7 @@ fn main() -> Result<(), String> {
         Box::new(EnvironmentSensor {}),
         Box::new(VibrationSensor {}),
         Box::new(led_handler),
+        Box::new(TPLinkHandler {}),
     ];
 
     if let (Ok(web_event_url), Ok(web_event_token)) =

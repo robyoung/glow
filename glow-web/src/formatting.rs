@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use chrono::{offset::Utc, DateTime};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use glow_events::{Event, LEDEvent, Message};
+use glow_events::{Event, LEDEvent, Message, TPLinkEvent};
 
 pub(crate) fn format_time_since(now: DateTime<Utc>, stamp: DateTime<Utc>) -> String {
     let duration = now.signed_duration_since(stamp);
@@ -105,6 +105,14 @@ fn get_message_extra(message: &Message) -> HashMap<String, Value> {
                 .collect::<Vec<String>>();
 
             extra.insert("colours".into(), colours.into());
+        }
+        Message::TPLink(TPLinkEvent::DeviceList(devices)) => {
+            let devices = devices
+                .iter()
+                .map(|d| json!({"name": d.name }))
+                .collect::<Vec<Value>>();
+
+            extra.insert("devices".into(), devices.into());
         }
         _ => {}
     }

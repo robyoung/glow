@@ -160,7 +160,7 @@ impl fmt::Display for TPLinkEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             TPLinkEvent::ListDevices => write!(f, "list devices"),
-            TPLinkEvent::DeviceList(devices) => write!(f, "device list: {:?}", devices),
+            TPLinkEvent::DeviceList(_) => write!(f, "device list"),
             TPLinkEvent::RunHeater => write!(f, "run heater"),
         }
     }
