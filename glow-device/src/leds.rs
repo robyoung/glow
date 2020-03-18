@@ -22,7 +22,6 @@ impl Default for Brightness {
     }
 }
 
-
 impl Brightness {
     pub(crate) fn next_from(brightness: f32) -> Self {
         if brightness < Brightness::Dim.value() {

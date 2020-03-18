@@ -105,7 +105,11 @@ impl EnvironmentEvent {
 impl fmt::Display for EnvironmentEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            EnvironmentEvent::Measurement(measurement) => write!(f, "temperature: {}°C humidity: {}%", measurement.temperature, measurement.humidity),
+            EnvironmentEvent::Measurement(measurement) => write!(
+                f,
+                "temperature: {}°C humidity: {}%",
+                measurement.temperature, measurement.humidity
+            ),
             EnvironmentEvent::Failure => write!(f, "failure"),
         }
     }
@@ -132,7 +136,7 @@ impl fmt::Display for TapEvent {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct TPLinkDevice {
-    pub name: String
+    pub name: String,
 }
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

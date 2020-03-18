@@ -61,6 +61,13 @@
         <span class="title">{{ event.title }}</span>
         <p>{{ event.detail }}</p>
         <p class="grey-text">{{ event.stamp }}</p>
+        {% if event.event_type == "led.leds-updated" %}
+          <div class="led-display">
+            {% for colour in event.extra["colours"] %}
+              <div style="background-color:{{ colour }}"></div>
+            {% endfor %}
+          </div>
+        {% endif %}
       </li>
       {% endfor %}
   </div>

@@ -3,8 +3,8 @@ extern crate blinkt;
 extern crate chrono;
 #[macro_use]
 extern crate log;
-extern crate ureq;
 extern crate glow_events;
+extern crate ureq;
 
 pub mod events;
 pub mod leds;
@@ -221,6 +221,11 @@ impl EventHandler for LEDHandler {
             Message::LED(LEDEvent::Update) => {
                 if let Err(err) = self.leds.show(&self.colours, self.brightness) {
                     error!("show error: {}", err);
+                } else {
+                    let colours = self.colours.iter().map(|c| (c.0, c.1, c.2)).collect();
+                    sender
+                        .send(Event::new(Message::LED(LEDEvent::LEDsUpdated(colours))))
+                        .unwrap();
                 }
             }
             Message::LED(LEDEvent::Brightness(brightness)) => {

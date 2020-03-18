@@ -35,7 +35,9 @@ pub async fn index(
     let conn = pool.get().unwrap();
     let mut ctx = tera::Context::new();
     if let Some(event) = store::get_latest_measurement(&conn) {
-        let flash: Option<String> = session.get("flash").map_err(|_| error::ErrorInternalServerError("invalid flash message"))?;
+        let flash: Option<String> = session
+            .get("flash")
+            .map_err(|_| error::ErrorInternalServerError("invalid flash message"))?;
         if flash.is_some() {
             session.remove("flash");
         }
@@ -96,7 +98,10 @@ pub async fn run_heater(
     let latest_event = store::get_latest_event_like(&conn, &r#"{"TPLink":"RunHeater"}"#)
         .map_err(|_| error::ErrorInternalServerError("failed to get latest heater event"))?;
     let can_run_heater = if let Some(latest_event) = latest_event {
-        Utc::now().signed_duration_since(latest_event.stamp()).num_minutes() < 5
+        Utc::now()
+            .signed_duration_since(latest_event.stamp())
+            .num_minutes()
+            < 5
     } else {
         true
     };
@@ -111,7 +116,6 @@ pub async fn run_heater(
 
     Ok(found("/"))
 }
-
 
 pub async fn login(tmpl: web::Data<tera::Tera>) -> impl Responder {
     render(tmpl, "login.html", None)

@@ -27,7 +27,8 @@ async fn main() -> std::io::Result<()> {
         ("login.html", include_str!("../templates/login.html")),
         ("index.html", include_str!("../templates/index.html")),
         ("base.html", include_str!("../templates/base.html")),
-    ]).unwrap();
+    ])
+    .unwrap();
 
     let pool = store::setup_db(&db_path);
 
@@ -62,10 +63,7 @@ async fn main() -> std::io::Result<()> {
                             .route(web::get().to(routes::list_events)),
                     ),
             )
-            .service(
-                web::resource("/status")
-                    .route(web::get().to(routes::status)),
-            )
+            .service(web::resource("/status").route(web::get().to(routes::status)))
             .service(
                 web::resource("/login")
                     .route(web::get().to(routes::login))

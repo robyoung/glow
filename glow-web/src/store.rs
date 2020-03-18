@@ -2,8 +2,8 @@ use chrono::{offset::Utc, DateTime};
 use fallible_iterator::FallibleIterator;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::{self, SqliteConnectionManager};
-use rusqlite::{types::FromSqlError, Result, Row, NO_PARAMS};
 use rand::Rng;
+use rusqlite::{types::FromSqlError, Result, Row, NO_PARAMS};
 
 use glow_events::{EnvironmentEvent, Event, Measurement, Message};
 
@@ -95,7 +95,10 @@ pub(crate) fn get_latest_event_like(
     conn: &PooledConnection<SqliteConnectionManager>,
     like: &str,
 ) -> Result<Option<Event>> {
-    let mut events = conn.prepare("SELECT stamp, message FROM events WHERE message like ? ORDER BY stamp DESC LIMIT 1")?
+    let mut events = conn
+        .prepare(
+            "SELECT stamp, message FROM events WHERE message like ? ORDER BY stamp DESC LIMIT 1",
+        )?
         .query(params![like])?
         .map(parse_event_row)
         .collect::<Vec<Event>>()?;
@@ -105,7 +108,6 @@ pub(crate) fn get_latest_event_like(
         Ok(events.pop())
     }
 }
-
 
 pub(crate) fn insert_measurement(
     conn: &PooledConnection<SqliteConnectionManager>,
@@ -164,17 +166,23 @@ pub(crate) fn queue_event(
     insert_event_to(&"event_queue", conn, event)
 }
 
-pub(crate) fn dequeue_events(conn: &PooledConnection<SqliteConnectionManager>) -> Result<Vec<Event>> {
+pub(crate) fn dequeue_events(
+    conn: &PooledConnection<SqliteConnectionManager>,
+) -> Result<Vec<Event>> {
     let token: u32 = rand::thread_rng().gen_range(2, std::u32::MAX);
     conn.execute(
         "UPDATE event_queue SET group_token = ?1, stamp = ?2 WHERE group_token = 0",
-        params![token, Utc::now()]
+        params![token, Utc::now()],
     )?;
-    let events = conn.prepare("SELECT stamp, message FROM event_queue WHERE group_token = ?1 ORDER BY stamp")?
+    let events = conn
+        .prepare("SELECT stamp, message FROM event_queue WHERE group_token = ?1 ORDER BY stamp")?
         .query(params![token])?
         .map(parse_event_row)
         .collect()?;
-    conn.execute("UPDATE event_queue SET group_token = 1 WHERE group_token = ?1", params![token])?;
+    conn.execute(
+        "UPDATE event_queue SET group_token = 1 WHERE group_token = ?1",
+        params![token],
+    )?;
     Ok(events)
 }
 
