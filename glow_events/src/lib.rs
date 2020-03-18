@@ -144,6 +144,8 @@ pub enum TPLinkEvent {
     ListDevices,
     DeviceList(Vec<TPLinkDevice>),
     RunHeater,
+    HeaterStarted,
+    HeaterStopped,
 }
 
 impl TPLinkEvent {
@@ -152,6 +154,8 @@ impl TPLinkEvent {
             TPLinkEvent::ListDevices => String::from("list-devices"),
             TPLinkEvent::DeviceList(_) => String::from("device-list"),
             TPLinkEvent::RunHeater => String::from("run-heater"),
+            TPLinkEvent::HeaterStarted => String::from("heater-started"),
+            TPLinkEvent::HeaterStopped => String::from("heater-stopped"),
         }
     }
 }
@@ -162,6 +166,8 @@ impl fmt::Display for TPLinkEvent {
             TPLinkEvent::ListDevices => write!(f, "list devices"),
             TPLinkEvent::DeviceList(_) => write!(f, "device list"),
             TPLinkEvent::RunHeater => write!(f, "run heater"),
+            TPLinkEvent::HeaterStarted => write!(f, "heater started"),
+            TPLinkEvent::HeaterStopped => write!(f, "heater stopped"),
         }
     }
 }

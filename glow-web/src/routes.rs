@@ -120,7 +120,7 @@ pub async fn run_heater(
         Utc::now()
             .signed_duration_since(latest_event.stamp())
             .num_minutes()
-            > 5
+            > 2
     } else {
         true
     };

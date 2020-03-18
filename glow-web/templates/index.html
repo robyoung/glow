@@ -31,19 +31,6 @@
   <div class="col 212 m6 l3">
     <div class="card blue-grey darken-4 measurement">
       <div class="card-content white-text center-align">
-        <form action="/list-devices" method="post">
-          <button class="btn waves-effect waves-light" type=submit name=action>
-            list devices
-           <i class="material-icons right">devices</i>
-        </button>
-        </form>
-      </div>
-    </div>
-  </div>
-
-  <div class="col 212 m6 l3">
-    <div class="card blue-grey darken-4 measurement">
-      <div class="card-content white-text center-align">
         <form action="/run-heater" method="post">
           <button class="btn waves-effect waves-light" type=submit name=action>
             run heater
@@ -91,6 +78,19 @@
       {% endfor %}
   </div>
   {% endif %}
+
+  <div class="col 212 m6 l3">
+    <div class="card blue-grey darken-4 measurement">
+      <div class="card-content white-text center-align">
+        <form action="/list-devices" method="post">
+          <button class="btn waves-effect waves-light" type=submit name=action>
+            list devices
+           <i class="material-icons right">devices</i>
+        </button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="row">
