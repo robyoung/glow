@@ -4,7 +4,7 @@ Description=Home Grown Glow
 [Service]
 Type=simple
 WorkingDirectory=/home/pi
-ExecStart=/home/pi/glow-device
+ExecStart=/usr/local/bin/glow-device
 Restart=always
 RestartSec=1
 Environment=IFTTT_WEBHOOK_KEY=${IFTTT_WEBHOOK_KEY}
