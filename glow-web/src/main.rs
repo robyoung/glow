@@ -76,6 +76,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/logout", web::get().to(routes::logout))
                     .route("/brightness", web::post().to(routes::set_brightness))
                     .route("/list-devices", web::post().to(routes::list_devices))
+                    .route("/stop-device", web::post().to(routes::stop_device))
                     .route("/run-heater", web::post().to(routes::run_heater)),
             )
     })

@@ -136,6 +136,20 @@ pub async fn run_heater(
     Ok(found("/"))
 }
 
+pub async fn stop_device(
+    pool: web::Data<Pool<SqliteConnectionManager>>,
+    session: Session,
+) -> Result<HttpResponse, Error> {
+    let conn = pool
+        .get()
+        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
+    store::queue_event(&conn, &Event::new(Message::Stop))
+        .map_err(|_| error::ErrorInternalServerError("failed to stop device"))?;
+    session.set("flash", "stop event queued")?;
+
+    Ok(found("/"))
+}
+
 pub async fn login(tmpl: web::Data<tera::Tera>) -> impl Responder {
     render(tmpl, "login.html", None)
 }
