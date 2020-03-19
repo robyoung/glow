@@ -250,6 +250,37 @@ impl WebEventHandler {
             receiver: Some(receiver),
         }
     }
+
+    fn send_events(client: &ureq::Agent, token: &str, url: &str, events: &Vec<Event>) -> Option<Vec<Event>> {
+
+        let mut tries = 5;
+        while tries > 0 {
+            // make request to server
+            let resp = client
+                .post(url)
+                .set("Content-Type", "application/json")
+                .auth_kind("Bearer", &token)
+                .send_json(serde_json::to_value(&events).unwrap());
+
+            if resp.ok() {
+                if let Ok(data) = resp.into_json() {
+                    if let Ok(events) = serde_json::from_value::<Vec<Event>>(data) {
+                        return Some(events);
+                    } else {
+                        error!("received badly formatted json");
+                    }
+                } else {
+                    error!("received invalid json");
+                }
+            } else {
+                error!("Failed to send {} events: {}", events.len(), resp.status());
+            }
+            tries = tries - 1;
+        }
+        error!("Failed all attempts at sending events");
+
+        None
+    }
 }
 
 impl EventHandler for WebEventHandler {
@@ -267,33 +298,18 @@ impl EventHandler for WebEventHandler {
                 let mut no_events = events.is_empty();
 
                 // make request to server
-                let resp = client
-                    .post(url.as_str())
-                    .set("Content-Type", "application/json")
-                    .auth_kind("Bearer", &token)
-                    .send_json(serde_json::to_value(&events).unwrap());
+                let events = WebEventHandler::send_events(&client, &token, &url, &events);
 
-                // send received events on bus
-                if resp.ok() {
-                    if let Ok(data) = resp.into_json() {
-                        if let Ok(events) = serde_json::from_value::<Vec<Event>>(data) {
-                            no_events = no_events && events.is_empty();
-                            if !events.is_empty() {
-                                info!("received {} events from remote", events.len());
-                            }
-                            for event in events {
-                                if let Err(err) = sender.send(event) {
-                                    error!("failed to send remote error to bus {:?}", err);
-                                }
-                            }
-                        } else {
-                            error!("received badly formatted json");
-                        }
-                    } else {
-                        error!("received invalid json");
+                if let Some(events) = events {
+                    no_events = no_events && events.is_empty();
+                    if !events.is_empty() {
+                        info!("received {} events from remote", events.len());
                     }
-                } else {
-                    error!("Failed to send {} events: {}", events.len(), resp.status());
+                    for event in events {
+                        if let Err(err) = sender.send(event) {
+                            error!("failed to send remote error to bus {:?}", err);
+                        }
+                    }
                 }
 
                 // sleep for poll interval
