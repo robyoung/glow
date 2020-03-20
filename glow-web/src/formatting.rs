@@ -80,6 +80,7 @@ fn get_message_icon(message: &Message) -> String {
         Message::TPLink(_) => "settings_remote",
         Message::LED(_) => "brightness_4",
         Message::Stop => "stop",
+        Message::Started => "started",
     }
     .to_string()
 }
@@ -91,6 +92,7 @@ fn get_message_icon_colour(message: &Message) -> String {
         Message::TPLink(_) => "amber",
         Message::LED(_) => "light-blue",
         Message::Stop => "red",
+        Message::Started => "red",
     }
     .to_string()
 }

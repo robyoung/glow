@@ -14,6 +14,10 @@ pub fn run_loop(mut handlers: Vec<Box<dyn EventHandler>>) {
         handler.start(sender.clone());
     }
 
+    sender
+        .send(Event::new(Message::Started))
+        .expect("could not send startup event");
+
     for event in receiver.iter() {
         for handler in handlers.iter_mut() {
             handler.handle(&event, &sender);

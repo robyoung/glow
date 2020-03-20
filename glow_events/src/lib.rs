@@ -51,6 +51,7 @@ pub enum Message {
     TPLink(TPLinkEvent),
     LED(LEDEvent),
     Stop,
+    Started,
 }
 
 impl Message {
@@ -61,6 +62,7 @@ impl Message {
             Message::TPLink(_) => String::from("TP-Link event"),
             Message::LED(_) => String::from("LED event"),
             Message::Stop => String::from("Stop event"),
+            Message::Started => String::from("Device started"),
         }
     }
 
@@ -71,6 +73,7 @@ impl Message {
             Message::TPLink(event) => format!("tplink.{}", event.event_type()),
             Message::LED(event) => format!("led.{}", event.event_type()),
             Message::Stop => String::from("stop"),
+            Message::Started => String::from("started"),
         }
     }
 }
@@ -83,6 +86,7 @@ impl fmt::Display for Message {
             Message::TPLink(event) => write!(f, "{}", event),
             Message::LED(event) => write!(f, "{}", event),
             Message::Stop => write!(f, "stop"),
+            Message::Started => write!(f, "start"),
         }
     }
 }
