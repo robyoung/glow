@@ -7,7 +7,7 @@ extern crate log;
 use std::env;
 
 use glow_device::{
-    events::{run_loop, EventHandler},
+    events::{run_loop, MessageHandler},
     leds::{
         BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED,
         COLOUR_SALMON,
@@ -33,7 +33,7 @@ fn main() -> Result<(), String> {
     let leds = BlinktLEDs::new();
     let led_handler = LEDHandler::new(leds, colour_range);
 
-    let mut handlers: Vec<Box<dyn EventHandler>> = vec![
+    let mut handlers: Vec<Box<dyn MessageHandler>> = vec![
         Box::new(EnvironmentSensor {}),
         Box::new(VibrationSensor {}),
         Box::new(led_handler),

@@ -7,7 +7,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use serde::Deserialize;
 use serde_json::json;
 
-use glow_events::{EnvironmentEvent, Event, LEDEvent, Message, TPLinkEvent};
+use glow_events::v2::{Command, Event, Message, Payload};
 
 use crate::formatting::{format_time_since, EventSummary};
 use crate::{found, store, AppState};
@@ -34,34 +34,34 @@ pub async fn index(
 ) -> Result<HttpResponse, Error> {
     let conn = pool.get().unwrap();
     let mut ctx = tera::Context::new();
-    if let Some(event) = store::get_latest_measurement(&conn) {
-        let flash: Option<String> = session
-            .get("flash")
-            .map_err(|_| error::ErrorInternalServerError("invalid flash message"))?;
-        if flash.is_some() {
-            session.remove("flash");
-        }
-        ctx.insert("event", &event);
-        ctx.insert("flash", &flash);
-        if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
+
+    let flash: Option<String> = session
+        .get("flash")
+        .map_err(|_| error::ErrorInternalServerError("invalid flash message"))?;
+    if flash.is_some() {
+        session.remove("flash");
+    }
+    ctx.insert("flash", &flash);
+
+    if let Some(message) = store::get_latest_measurement(&conn) {
+        if let Payload::Event(Event::Measurement(measurement)) = message.payload() {
             ctx.insert("measurement", measurement);
             ctx.insert(
                 "measurement_age",
-                &format_time_since(Utc::now(), event.stamp()),
-            );
-            let events = match store::get_latest_events(&conn, 20) {
-                Ok(events) => events,
-                Err(_) => Vec::new(),
-            };
-            ctx.insert(
-                "events",
-                &events
-                    .iter()
-                    .map(EventSummary::from)
-                    .collect::<Vec<EventSummary>>(),
+                &format_time_since(Utc::now(), message.stamp()),
             );
         }
     }
+    let events = match store::get_latest_events(&conn, 20) {
+        Ok(events) => events,
+        Err(_) => Vec::new(),
+    };
+    let events = events
+        .iter()
+        .map(EventSummary::from)
+        .collect::<Vec<EventSummary>>();
+    ctx.insert("events", &events);
+
     render(tmpl, "index.html", Some(&ctx))
 }
 
@@ -78,11 +78,11 @@ pub async fn set_brightness(
     let conn = pool
         .get()
         .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
-    let event = Event::new(Message::LED(LEDEvent::Brightness(
-        form.brightness as f32 / 100.0,
-    )));
-    store::queue_event(&conn, &event)
-        .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
+    store::queue_command(
+        &conn,
+        Command::SetBrightness(form.brightness as f32 / 100.0),
+    )
+    .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
     session.set("flash", "set brightness event queued")?;
     Ok(found("/"))
 }
@@ -95,11 +95,8 @@ pub async fn list_devices(
         .get()
         .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
 
-    store::queue_event(
-        &conn,
-        &Event::new(Message::TPLink(TPLinkEvent::ListDevices)),
-    )
-    .map_err(|_| error::ErrorInternalServerError("failed to request device list"))?;
+    store::queue_command(&conn, Command::ListDevices)
+        .map_err(|_| error::ErrorInternalServerError("failed to request device list"))?;
 
     session.set("flash", "list devices request sent")?;
 
@@ -126,7 +123,7 @@ pub async fn run_heater(
     };
 
     if can_run_heater {
-        store::queue_event(&conn, &Event::new(Message::TPLink(TPLinkEvent::RunHeater)))
+        store::queue_command(&conn, Command::RunHeater)
             .map_err(|_| error::ErrorInternalServerError("failed to run heater event"))?;
         session.set("flash", "run heater event queued")?;
     } else {
@@ -143,7 +140,7 @@ pub async fn stop_device(
     let conn = pool
         .get()
         .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
-    store::queue_event(&conn, &Event::new(Message::Stop))
+    store::queue_command(&conn, Command::Stop)
         .map_err(|_| error::ErrorInternalServerError("failed to stop device"))?;
     session.set("flash", "stop event queued")?;
 
@@ -179,18 +176,18 @@ pub async fn logout(session: Session) -> Result<HttpResponse, Error> {
 
 pub async fn store_events(
     pool: web::Data<Pool<SqliteConnectionManager>>,
-    events: web::Json<Vec<Event>>,
+    events: web::Json<Vec<Message>>,
 ) -> impl Responder {
     let conn = pool.get().unwrap();
 
     for event in events.0.iter() {
         store::insert_event(&conn, event).unwrap();
-        if let Message::Environment(EnvironmentEvent::Measurement(measurement)) = event.message() {
+        if let Payload::Event(Event::Measurement(measurement)) = event.payload() {
             store::insert_measurement(&conn, event.stamp(), measurement).unwrap();
         }
     }
-    store::dequeue_events(&conn)
-        .map(|return_events| HttpResponse::Ok().json(return_events))
+    store::dequeue_commands(&conn)
+        .map(|commands| HttpResponse::Ok().json(commands))
         .map_err(|err| error::ErrorInternalServerError(format!("{}", err)))
 }
 

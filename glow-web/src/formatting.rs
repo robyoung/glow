@@ -4,7 +4,7 @@ use chrono::{offset::Utc, DateTime};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use glow_events::{Event, LEDEvent, Message, TPLinkEvent};
+use glow_events::v2::{Event, Message, Payload};
 
 pub(crate) fn format_time_since(now: DateTime<Utc>, stamp: DateTime<Utc>) -> String {
     let duration = now.signed_duration_since(stamp);
@@ -58,49 +58,55 @@ pub(crate) struct EventSummary {
     pub extra: HashMap<String, Value>,
 }
 
-impl From<&Event> for EventSummary {
-    fn from(event: &Event) -> Self {
+impl From<&Message> for EventSummary {
+    fn from(message: &Message) -> Self {
         let mut summary = EventSummary::default();
 
-        summary.stamp = format!("{}", event.stamp().format("%F %T"));
-        summary.title = event.message().title();
-        summary.icon = get_message_icon(event.message());
-        summary.icon_colour = get_message_icon_colour(event.message());
-        summary.detail = format!("{}", event.message());
-        summary.event_type = event.message().event_type();
-        summary.extra = get_message_extra(event.message());
+        if let Payload::Event(event) = message.payload() {
+            summary.stamp = format!("{}", message.stamp().format("%F %T"));
+            summary.title = event.title().to_string();
+            summary.icon = get_event_icon(event).to_string();
+            summary.icon_colour = get_event_icon_colour(event).to_string();
+            summary.detail = format!("{}", event);
+            summary.event_type = event.event_type().to_string();
+            summary.extra = get_event_extra(event);
+        }
         summary
     }
 }
 
-fn get_message_icon(message: &Message) -> String {
-    match message {
-        Message::Environment(_) => "eco",
-        Message::Tap(_) => "touch_app",
-        Message::TPLink(_) => "settings_remote",
-        Message::LED(_) => "brightness_4",
-        Message::Stop => "stop",
-        Message::Started => "started",
+fn get_event_icon(event: &Event) -> &'static str {
+    match event {
+        Event::Measurement(_) => "eco",
+        Event::MeasurementFailure => "eco",
+        Event::SingleTap => "touch_app",
+        Event::Devices(_) => "settings_remote",
+        Event::HeaterStarted => "settings_remote",
+        Event::HeaterStopped => "settings_remote",
+        Event::LEDBrightness(_) => "brightness_4",
+        Event::LEDColours(_) => "brightness_4",
+        Event::Started => "started",
     }
-    .to_string()
 }
 
-fn get_message_icon_colour(message: &Message) -> String {
-    match message {
-        Message::Environment(_) => "green",
-        Message::Tap(_) => "teal",
-        Message::TPLink(_) => "amber",
-        Message::LED(_) => "light-blue",
-        Message::Stop => "red",
-        Message::Started => "red",
+fn get_event_icon_colour(event: &Event) -> &'static str {
+    match event {
+        Event::Measurement(_) => "green",
+        Event::MeasurementFailure => "green",
+        Event::SingleTap => "teal",
+        Event::Devices(_) => "amber",
+        Event::HeaterStarted => "amber",
+        Event::HeaterStopped => "amber",
+        Event::LEDBrightness(_) => "light-blue",
+        Event::LEDColours(_) => "light-blue",
+        Event::Started => "red",
     }
-    .to_string()
 }
 
-fn get_message_extra(message: &Message) -> HashMap<String, Value> {
+fn get_event_extra(event: &Event) -> HashMap<String, Value> {
     let mut extra = HashMap::new();
-    match message {
-        Message::LED(LEDEvent::LEDsUpdated(colours)) => {
+    match event {
+        Event::LEDColours(colours) => {
             let colours = colours
                 .iter()
                 .map(|c| format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2))
@@ -108,7 +114,7 @@ fn get_message_extra(message: &Message) -> HashMap<String, Value> {
 
             extra.insert("colours".into(), colours.into());
         }
-        Message::TPLink(TPLinkEvent::DeviceList(devices)) => {
+        Event::Devices(devices) => {
             let devices = devices
                 .iter()
                 .map(|d| json!({"name": d.name }))

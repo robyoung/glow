@@ -1,25 +1,23 @@
 use std::{net::SocketAddr, sync::mpsc::SyncSender, thread, time};
 
 use log::error;
-use tplinker::{
-    capabilities::Switch,
-    datatypes::DeviceData,
-    devices::Device,
-    discovery::discover,
+use tplinker::{capabilities::Switch, datatypes::DeviceData, devices::Device, discovery::discover};
+
+use glow_events::{
+    v2::{Command, Event, Message, Payload},
+    TPLinkDevice,
 };
 
-use glow_events::{Event, Message, TPLinkDevice, TPLinkEvent};
-
-use crate::events::EventHandler;
+use crate::events::MessageHandler;
 
 const HEATER_ON_TIME: time::Duration = time::Duration::from_secs(90);
 
 pub struct TPLinkHandler {}
 
-impl EventHandler for TPLinkHandler {
-    fn handle(&mut self, event: &Event, sender: &SyncSender<Event>) {
-        match event.message() {
-            Message::TPLink(TPLinkEvent::ListDevices) => match discover() {
+impl MessageHandler for TPLinkHandler {
+    fn handle(&mut self, message: &Message, sender: &SyncSender<Message>) {
+        match message.payload() {
+            Payload::Command(Command::ListDevices) => match discover() {
                 Ok(result) => {
                     let mut devices: Vec<TPLinkDevice> = Vec::new();
                     for (_addr, device) in result {
@@ -27,14 +25,14 @@ impl EventHandler for TPLinkHandler {
                             name: device.sysinfo().alias.clone(),
                         })
                     }
-                    let event = Event::new(Message::TPLink(TPLinkEvent::DeviceList(devices)));
-                    if let Err(err) = sender.send(event) {
+                    let message = Message::event(Event::Devices(devices));
+                    if let Err(err) = sender.send(message) {
                         error!("Failed to write TPLink device list to channel: {:?}", err);
                     }
                 }
                 Err(err) => error!("Failed to list TPLink devices {}", err),
             },
-            Message::TPLink(TPLinkEvent::RunHeater) => {
+            Payload::Command(Command::RunHeater) => {
                 if let Some((addr, data)) = find_by_alias(&"Heater") {
                     let device = Device::from_data(addr, &data);
 
@@ -44,7 +42,7 @@ impl EventHandler for TPLinkHandler {
                                 .switch_on()
                                 .unwrap_or_else(|_err| error!("Failed to switch heater on"));
                             sender
-                                .send(Event::new(Message::TPLink(TPLinkEvent::HeaterStarted)))
+                                .send(Message::event(Event::HeaterStarted))
                                 .unwrap_or_else(|_err| error!("Failed to write heater on event"));
                             let sender = sender.clone();
                             thread::spawn(move || {
@@ -54,7 +52,7 @@ impl EventHandler for TPLinkHandler {
                                     .switch_off()
                                     .unwrap_or_else(|_err| error!("Failed to switch heater off"));
                                 sender
-                                    .send(Event::new(Message::TPLink(TPLinkEvent::HeaterStopped)))
+                                    .send(Message::event(Event::HeaterStopped))
                                     .unwrap_or_else(|_err| {
                                         error!("Failed to write heater off event")
                                     });

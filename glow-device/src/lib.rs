@@ -15,9 +15,12 @@ use rppal::{
     i2c::I2c,
 };
 
-use glow_events::{EnvironmentEvent, Event, LEDEvent, Measurement, Message, TapEvent};
+use glow_events::{
+    v2::{Command, Event, Message, Payload},
+    Measurement,
+};
 
-use crate::events::EventHandler;
+use crate::events::MessageHandler;
 use crate::leds::{Brightness, Colour, ColourRange, LEDs};
 
 pub struct EnvironmentSensor {}
@@ -29,8 +32,8 @@ const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
 const ENVIRONMENT_SENSOR_SLEEP: u64 = 15;
 const ENVIRONMENT_SENSOR_MAX_SKIP: u8 = 10;
 
-impl EventHandler for EnvironmentSensor {
-    fn start(&mut self, sender: SyncSender<Event>) {
+impl MessageHandler for EnvironmentSensor {
+    fn start(&mut self, sender: SyncSender<Message>) {
         thread::spawn(move || {
             let device = I2c::new().expect("could not initialise I2C");
             let delay = Delay::new();
@@ -56,9 +59,8 @@ impl EventHandler for EnvironmentSensor {
                     );
                     previous_data = Some(measurement);
 
-                    let event =
-                        Event::new_measurement(measurement.temperature, measurement.humidity);
-                    if let Err(err) = sender.send(event) {
+                    let message = Message::event(Event::Measurement(measurement));
+                    if let Err(err) = sender.send(message) {
                         warn!("Failed to write sensor data to channel: {:?}", err);
                     }
                 } else {
@@ -102,8 +104,8 @@ fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Measurement {
 
 pub struct VibrationSensor {}
 
-impl EventHandler for VibrationSensor {
-    fn start(&mut self, sender: SyncSender<Event>) {
+impl MessageHandler for VibrationSensor {
+    fn start(&mut self, sender: SyncSender<Message>) {
         let gpio = Gpio::new().unwrap();
         let mut pin = gpio
             .get(VIBRATION_SENSOR_INTERRUPT_PIN)
@@ -117,9 +119,7 @@ impl EventHandler for VibrationSensor {
                     Ok(Some(_)) => {
                         if last_event.elapsed().as_millis() > VIBRATION_SENSOR_INTERRUPT_BOUNCE {
                             last_event = time::Instant::now();
-                            if let Err(err) =
-                                sender.send(Event::new(Message::Tap(TapEvent::SingleTap)))
-                            {
+                            if let Err(err) = sender.send(Message::event(Event::SingleTap)) {
                                 error!("Failed to write tap event to channel: {:?}", err);
                             }
                         }
@@ -141,10 +141,10 @@ impl EventHandler for VibrationSensor {
 pub struct PrintMeasurementHandler;
 
 impl PrintMeasurementHandler {
-    fn print(&self, event: &Event, name: &str, temperature: f64, humidity: f64) {
+    fn print(&self, message: &Message, name: &str, temperature: f64, humidity: f64) {
         println!(
             "{},{},{},{}",
-            event.stamp().to_rfc3339(),
+            message.stamp().to_rfc3339(),
             name,
             temperature,
             humidity
@@ -152,13 +152,16 @@ impl PrintMeasurementHandler {
     }
 }
 
-impl EventHandler for PrintMeasurementHandler {
-    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
-        match event.message() {
-            Message::Environment(EnvironmentEvent::Measurement(measurement)) => {
-                self.print(event, "data", measurement.temperature, measurement.humidity)
-            }
-            Message::Tap(TapEvent::SingleTap) => self.print(event, "tap", 0.0, 0.0),
+impl MessageHandler for PrintMeasurementHandler {
+    fn handle(&mut self, message: &Message, _: &SyncSender<Message>) {
+        match message.payload() {
+            Payload::Event(Event::Measurement(measurement)) => self.print(
+                message,
+                "data",
+                measurement.temperature,
+                measurement.humidity,
+            ),
+            Payload::Event(Event::SingleTap) => self.print(message, "tap", 0.0, 0.0),
             _ => {}
         }
     }
@@ -183,49 +186,43 @@ impl LEDHandler {
     }
 }
 
-impl EventHandler for LEDHandler {
-    fn handle(&mut self, event: &Event, sender: &SyncSender<Event>) {
-        let message = event.message();
-        match message {
-            Message::Environment(EnvironmentEvent::Measurement(measurement)) => {
+impl MessageHandler for LEDHandler {
+    fn handle(&mut self, message: &Message, sender: &SyncSender<Message>) {
+        match message.payload() {
+            Payload::Event(Event::Measurement(measurement)) => {
                 let colours = self.colour_range.get_pixels(measurement.temperature as f32);
                 if colours.iter().zip(&self.colours).any(|(&a, &b)| a != b) {
                     self.colours = colours;
-                    sender
-                        .send(Event::new(Message::LED(LEDEvent::Update)))
-                        .unwrap();
+                    sender.send(Message::command(Command::UpdateLEDs)).unwrap();
                 } else {
                     debug!("Not updating unchanged LEDs");
                 }
             }
-            Message::Tap(TapEvent::SingleTap) => {
+            Payload::Event(Event::SingleTap) => {
                 self.brightness = Brightness::next_from(self.brightness).value();
-                sender
-                    .send(Event::new(Message::LED(LEDEvent::Party)))
-                    .unwrap();
-                sender
-                    .send(Event::new(Message::LED(LEDEvent::Update)))
-                    .unwrap();
+                sender.send(Message::command(Command::RunParty)).unwrap();
+                sender.send(Message::command(Command::UpdateLEDs)).unwrap();
             }
-            Message::LED(LEDEvent::Party) => {
+            Payload::Command(Command::RunParty) => {
                 if let Err(err) = self.leds.party() {
                     error!("party error: {}", err);
                 }
             }
-            Message::LED(LEDEvent::Update) => {
+            Payload::Command(Command::UpdateLEDs) => {
                 if let Err(err) = self.leds.show(&self.colours, self.brightness) {
                     error!("show error: {}", err);
                 } else {
                     let colours = self.colours.iter().map(|c| (c.0, c.1, c.2)).collect();
                     sender
-                        .send(Event::new(Message::LED(LEDEvent::LEDsUpdated(colours))))
+                        .send(Message::event(Event::LEDColours(colours)))
                         .unwrap();
                 }
             }
-            Message::LED(LEDEvent::Brightness(brightness)) => {
+            Payload::Command(Command::SetBrightness(brightness)) => {
                 self.brightness = *brightness;
+                sender.send(Message::command(Command::UpdateLEDs)).unwrap();
                 sender
-                    .send(Event::new(Message::LED(LEDEvent::Update)))
+                    .send(Message::event(Event::LEDBrightness(*brightness)))
                     .unwrap();
             }
             _ => {}
@@ -236,8 +233,8 @@ impl EventHandler for LEDHandler {
 pub struct WebEventHandler {
     url: String,
     token: String,
-    sender: SyncSender<Event>,
-    receiver: Option<Receiver<Event>>,
+    sender: SyncSender<Message>,
+    receiver: Option<Receiver<Message>>,
 }
 
 impl WebEventHandler {
@@ -251,8 +248,12 @@ impl WebEventHandler {
         }
     }
 
-    fn send_events(client: &ureq::Agent, token: &str, url: &str, events: &Vec<Event>) -> Option<Vec<Event>> {
-
+    fn send_events(
+        client: &ureq::Agent,
+        token: &str,
+        url: &str,
+        events: &Vec<Message>,
+    ) -> Option<Vec<Message>> {
         let mut tries = 5;
         while tries > 0 {
             // make request to server
@@ -264,8 +265,8 @@ impl WebEventHandler {
 
             if resp.ok() {
                 if let Ok(data) = resp.into_json() {
-                    if let Ok(events) = serde_json::from_value::<Vec<Event>>(data) {
-                        return Some(events);
+                    if let Ok(commands) = serde_json::from_value::<Vec<Message>>(data) {
+                        return Some(commands);
                     } else {
                         error!("received badly formatted json");
                     }
@@ -283,8 +284,8 @@ impl WebEventHandler {
     }
 }
 
-impl EventHandler for WebEventHandler {
-    fn start(&mut self, sender: SyncSender<Event>) {
+impl MessageHandler for WebEventHandler {
+    fn start(&mut self, sender: SyncSender<Message>) {
         let url = self.url.clone();
         let token = self.token.clone();
         // TODO: think of a better way of doing this, maybe send out on sender
@@ -294,34 +295,37 @@ impl EventHandler for WebEventHandler {
             let client = ureq::agent();
             loop {
                 // read all events off the queue
-                let events = receiver.try_iter().collect::<Vec<Event>>();
-                let mut no_events = events.is_empty();
+                let events = receiver.try_iter().collect::<Vec<Message>>();
+
+                let mut no_messages = events.is_empty();
 
                 // make request to server
-                let events = WebEventHandler::send_events(&client, &token, &url, &events);
+                let commands = WebEventHandler::send_events(&client, &token, &url, &events);
 
-                if let Some(events) = events {
-                    no_events = no_events && events.is_empty();
-                    if !events.is_empty() {
-                        info!("received {} events from remote", events.len());
+                if let Some(commands) = commands {
+                    no_messages = no_messages && commands.is_empty();
+                    if !commands.is_empty() {
+                        info!("received {} commands from remote", commands.len());
                     }
-                    for event in events {
-                        if let Err(err) = sender.send(event) {
+                    for command in commands {
+                        if let Err(err) = sender.send(command) {
                             error!("failed to send remote error to bus {:?}", err);
                         }
                     }
                 }
 
                 // sleep for poll interval
-                let sleep = if no_events { 5 } else { 1 };
+                let sleep = if no_messages { 5 } else { 1 };
                 thread::sleep(time::Duration::from_secs(sleep));
             }
         });
     }
 
-    fn handle(&mut self, event: &Event, _: &SyncSender<Event>) {
-        if let Err(err) = self.sender.send(event.clone()) {
-            error!("failed to send event to remote worker: {:?}", err);
+    fn handle(&mut self, message: &Message, _: &SyncSender<Message>) {
+        if let Payload::Event(_) = message.payload() {
+            if let Err(err) = self.sender.send(message.clone()) {
+                error!("failed to send event to remote worker: {:?}", err);
+            }
         }
     }
 }
