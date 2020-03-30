@@ -6,7 +6,7 @@ Type=simple
 WorkingDirectory=/home/pi
 ExecStart=/usr/local/bin/glow-device
 Restart=always
-RestartSec=1
+RestartSec=60
 Environment=IFTTT_WEBHOOK_KEY=${IFTTT_WEBHOOK_KEY}
 Environment=WEB_EVENT_URL=${GLOW_DEVICE_WEB_EVENT_URL}
 Environment=WEB_EVENT_TOKEN=${GLOW_DEVICE_WEB_EVENT_TOKEN}

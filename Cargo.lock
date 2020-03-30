@@ -340,9 +340,9 @@ dependencies = [
 
 [[package]]
 name = "am2320"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d17fcfb9405052d33bf668f9dd9fe19e6173cc42d82246a042aa3e83db90654"
+checksum = "9c0f73383f57d7eaffc78c9ed6d91887c6d3c365bb6991d8c8c6b7699f4af9c7"
 dependencies = [
  "embedded-hal",
 ]

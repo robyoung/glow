@@ -7,7 +7,7 @@ use std::{
     thread, time,
 };
 
-use am2320::AM2320;
+use am2320::Am2320;
 use log::{debug, error, info, warn};
 use rppal::{
     gpio::{Gpio, Trigger},
@@ -29,7 +29,7 @@ const VIBRATION_SENSOR_INTERRUPT_PIN: u8 = 17;
 const VIBRATION_SENSOR_INTERRUPT_BOUNCE: u128 = 300;
 const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 3;
 const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
-const ENVIRONMENT_SENSOR_SLEEP: u64 = 15;
+const ENVIRONMENT_SENSOR_SLEEP: u64 = 30;
 const ENVIRONMENT_SENSOR_MAX_SKIP: u8 = 10;
 
 impl MessageHandler for EnvironmentSensor {
@@ -38,7 +38,7 @@ impl MessageHandler for EnvironmentSensor {
             let device = I2c::new().expect("could not initialise I2C");
             let delay = Delay::new();
 
-            let mut am2320 = AM2320::new(device, delay);
+            let mut am2320 = Am2320::new(device, delay);
             let mut previous_data: Option<Measurement> = None;
             let mut num_skipped: u8 = 0;
 
@@ -77,17 +77,23 @@ impl MessageHandler for EnvironmentSensor {
     }
 }
 
-fn read_am2320(sensor: &mut AM2320<I2c, Delay>) -> Measurement {
+fn read_am2320(sensor: &mut Am2320<I2c, Delay>) -> Measurement {
     let mut error_count: u8 = 0;
     let mut backoff_count: u64 = 0;
     loop {
         match sensor.read() {
-            Ok(m) => return Measurement::new(m.temperature, m.humidity),
+            Ok(m) => {
+                if error_count > 0 {
+                    info!("AM2320 read success after {} failures: {:?} ", error_count, m);
+                }
+                return Measurement::new(m.temperature as f64, m.humidity as f64)
+            }
             Err(err) => {
+                error!("AM232O read error: {:?}", err);
                 error_count += 1;
                 if error_count > ENVIRONMENT_SENSOR_ERROR_LIMIT {
                     let sleep = ENVIRONMENT_SENSOR_SLEEP * (backoff_count + 1);
-                    error!("too many errors, backing off for {}s: {:?}", sleep, err);
+                    error!("too many errors, backing off for {}s", sleep);
                     thread::sleep(time::Duration::from_secs(sleep));
                     error_count = 0;
                     if backoff_count < ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT {

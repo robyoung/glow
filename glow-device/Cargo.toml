@@ -5,7 +5,7 @@ authors = ["Rob Young <rob@robyoung.digital>"]
 edition = "2018"
 
 [dependencies]
-am2320 = "0.1.1"
+am2320 = "0.2.0"
 blinkt = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 embedded-hal = "0.2"
