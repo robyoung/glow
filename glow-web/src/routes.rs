@@ -46,6 +46,7 @@ pub async fn index(
     if let Some(message) = store::get_latest_measurement(&conn) {
         if let Payload::Event(Event::Measurement(measurement)) = message.payload() {
             ctx.insert("measurement", measurement);
+            ctx.insert("temperature", &format!("{:.2}", measurement.temperature));
             ctx.insert(
                 "measurement_age",
                 &format_time_since(Utc::now(), message.stamp()),

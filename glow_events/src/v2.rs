@@ -101,7 +101,7 @@ impl fmt::Display for Event {
         match self {
             Event::Measurement(measurement) => write!(
                 f,
-                "temperature: {}°C humidity: {}%",
+                "temperature: {:.2}°C humidity: {:.2}%",
                 measurement.temperature, measurement.humidity
             ),
             Event::MeasurementFailure => write!(f, "failure"),
@@ -109,7 +109,7 @@ impl fmt::Display for Event {
             Event::Devices(_) => write!(f, "device list"),
             Event::HeaterStarted => write!(f, "heater started"),
             Event::HeaterStopped => write!(f, "heater stopped"),
-            Event::LEDBrightness(brightness) => write!(f, "brightness: {}", brightness),
+            Event::LEDBrightness(brightness) => write!(f, "brightness: {:.2}", brightness),
             Event::LEDColours(_) => write!(f, "colours updated"),
             Event::Started => write!(f, "started"),
         }
