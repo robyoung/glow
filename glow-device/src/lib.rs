@@ -119,7 +119,7 @@ impl EnvironmentWorker {
         num_skipped: u8,
     ) -> bool {
         let is_changed = if let Some(previous_data) = previous_data {
-            !previous_data.roughly_equal(measurement)
+            !previous_data.temperature_roughly_equal(measurement)
         } else {
             true
         };
