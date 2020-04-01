@@ -23,8 +23,6 @@ use glow_events::{
 use crate::events::MessageHandler;
 use crate::leds::{Brightness, Colour, ColourRange, LEDs};
 
-pub struct EnvironmentSensor {}
-
 const VIBRATION_SENSOR_INTERRUPT_PIN: u8 = 17;
 const VIBRATION_SENSOR_INTERRUPT_BOUNCE: u128 = 300;
 const ENVIRONMENT_SENSOR_ERROR_LIMIT: u8 = 3;
@@ -32,79 +30,116 @@ const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
 const ENVIRONMENT_SENSOR_SLEEP: u64 = 30;
 const ENVIRONMENT_SENSOR_MAX_SKIP: u8 = 10;
 
-impl MessageHandler for EnvironmentSensor {
-    fn start(&mut self, sender: SyncSender<Message>) {
-        thread::spawn(move || {
-            let device = I2c::new().expect("could not initialise I2C");
-            let delay = Delay::new();
+pub struct EnvironmentSensor {}
 
-            let mut am2320 = Am2320::new(device, delay);
-            let mut previous_data: Option<Measurement> = None;
-            let mut num_skipped: u8 = 0;
-
-            loop {
-                let measurement = read_am2320(&mut am2320);
-
-                let changed = if let Some(previous_data) = &previous_data {
-                    !previous_data.roughly_equal(&measurement)
-                } else {
-                    true
-                };
-
-                if changed || num_skipped > ENVIRONMENT_SENSOR_MAX_SKIP {
-                    num_skipped = 0;
-                    debug!(
-                        "Sending changed data: {:?} {:?}",
-                        measurement, previous_data
-                    );
-                    previous_data = Some(measurement);
-
-                    let message = Message::event(Event::Measurement(measurement));
-                    if let Err(err) = sender.send(message) {
-                        warn!("Failed to write sensor data to channel: {:?}", err);
-                    }
-                } else {
-                    num_skipped += 1;
-                    debug!(
-                        "Skipping unchanged data: {:?} {:?}",
-                        measurement, previous_data
-                    );
-                }
-
-                thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP));
-            }
-        });
-    }
+struct EnvironmentWorker {
+    am2320: Am2320<I2c, Delay>,
 }
 
-fn read_am2320(sensor: &mut Am2320<I2c, Delay>) -> Measurement {
-    let mut error_count: u8 = 0;
-    let mut backoff_count: u64 = 0;
-    loop {
-        match sensor.read() {
-            Ok(m) => {
-                if error_count > 0 {
-                    info!("AM2320 read success after {} failures: {:?} ", error_count, m);
+impl EnvironmentWorker {
+    fn new() -> Self {
+        let device = I2c::new().expect("could not initialise I2C");
+        let delay = Delay::new();
+
+        EnvironmentWorker {
+            am2320: Am2320::new(device, delay),
+        }
+    }
+
+    fn run(&mut self, sender: SyncSender<Message>) {
+        let mut previous_data: Option<Measurement> = None;
+        let mut num_skipped: u8 = 0;
+
+        loop {
+            let measurement = self.read();
+
+            if self.should_send(&measurement, &previous_data, num_skipped) {
+                num_skipped = 0;
+                debug!(
+                    "Sending changed data: {:?} {:?}",
+                    measurement, previous_data
+                );
+                previous_data = Some(measurement);
+
+                let message = Message::event(Event::Measurement(measurement));
+                if let Err(err) = sender.send(message) {
+                    warn!("Failed to write sensor data to channel: {:?}", err);
                 }
-                return Measurement::new(m.temperature as f64, m.humidity as f64)
+            } else {
+                num_skipped += 1;
+                debug!(
+                    "Skipping unchanged data: {:?} {:?}",
+                    measurement, previous_data
+                );
             }
-            Err(err) => {
-                error!("AM232O read error: {:?}", err);
-                error_count += 1;
-                if error_count > ENVIRONMENT_SENSOR_ERROR_LIMIT {
-                    let sleep = ENVIRONMENT_SENSOR_SLEEP * (backoff_count + 1);
-                    error!("too many errors, backing off for {}s", sleep);
-                    thread::sleep(time::Duration::from_secs(sleep));
-                    error_count = 0;
-                    if backoff_count < ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT {
-                        backoff_count += 1;
-                    } else {
-                        error!("environment sensor backoff limit reached; shutting down");
-                        std::process::exit(1);
+
+            self.sleep(num_skipped);
+            thread::sleep(time::Duration::from_secs(ENVIRONMENT_SENSOR_SLEEP));
+        }
+    }
+
+    fn read(&mut self) -> Measurement {
+        let mut error_count: u8 = 0;
+        let mut backoff_count: u64 = 0;
+        loop {
+            match self.am2320.read() {
+                Ok(m) => {
+                    if error_count > 0 {
+                        info!(
+                            "AM2320 read success after {} failures: {:?} ",
+                            error_count, m
+                        );
+                    }
+                    return Measurement::new(m.temperature as f64, m.humidity as f64);
+                }
+                Err(err) => {
+                    error!("AM232O read error: {:?}", err);
+                    error_count += 1;
+                    if error_count > ENVIRONMENT_SENSOR_ERROR_LIMIT {
+                        let sleep = ENVIRONMENT_SENSOR_SLEEP * (backoff_count + 1);
+                        error!("too many errors, backing off for {}s", sleep);
+                        thread::sleep(time::Duration::from_secs(sleep));
+                        error_count = 0;
+                        if backoff_count < ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT {
+                            backoff_count += 1;
+                        } else {
+                            error!("environment sensor backoff limit reached; shutting down");
+                            std::process::exit(1);
+                        }
                     }
                 }
             }
         }
+    }
+
+    fn should_send(
+        &self,
+        measurement: &Measurement,
+        previous_data: &Option<Measurement>,
+        num_skipped: u8,
+    ) -> bool {
+        let is_changed = if let Some(previous_data) = previous_data {
+            !previous_data.roughly_equal(measurement)
+        } else {
+            true
+        };
+        is_changed || num_skipped > ENVIRONMENT_SENSOR_MAX_SKIP
+    }
+
+    fn sleep(&self, num_skipped: u8) {
+        thread::sleep(time::Duration::from_secs(
+            (ENVIRONMENT_SENSOR_SLEEP as f64
+                + ENVIRONMENT_SENSOR_SLEEP as f64 * 0.1 * num_skipped as f64) as u64,
+        ));
+    }
+}
+
+impl MessageHandler for EnvironmentSensor {
+    fn start(&mut self, sender: SyncSender<Message>) {
+        thread::spawn(move || {
+            let mut worker = EnvironmentWorker::new();
+            worker.run(sender);
+        });
     }
 }
 
@@ -237,36 +272,92 @@ impl MessageHandler for LEDHandler {
 }
 
 pub struct WebEventHandler {
-    url: String,
-    token: String,
     sender: SyncSender<Message>,
-    receiver: Option<Receiver<Message>>,
+    worker: Option<WebEventWorker>,
 }
 
 impl WebEventHandler {
-    pub fn new(url: String, token: String) -> WebEventHandler {
+    pub fn new(url: String, token: String) -> Self {
         let (sender, receiver) = sync_channel(20);
-        WebEventHandler {
+        Self {
+            sender,
+            worker: Some(WebEventWorker::new(url, token, receiver)),
+        }
+    }
+}
+
+impl MessageHandler for WebEventHandler {
+    fn start(&mut self, sender: SyncSender<Message>) {
+        let mut worker = self.worker.take().unwrap();
+
+        thread::spawn(move || worker.run(sender));
+    }
+
+    fn handle(&mut self, message: &Message, _: &SyncSender<Message>) {
+        if let Payload::Event(_) = message.payload() {
+            if let Err(err) = self.sender.send(message.clone()) {
+                error!("failed to send event to remote worker: {:?}", err);
+            }
+        }
+    }
+}
+
+struct WebEventWorker {
+    url: String,
+    token: String,
+    receiver: Receiver<Message>,
+}
+
+impl WebEventWorker {
+    fn new(url: String, token: String, receiver: Receiver<Message>) -> Self {
+        Self {
             url,
             token,
-            sender,
-            receiver: Some(receiver),
+            receiver,
         }
     }
 
-    fn send_events(
-        client: &ureq::Agent,
-        token: &str,
-        url: &str,
-        events: &Vec<Message>,
-    ) -> Option<Vec<Message>> {
+    fn run(&mut self, sender: SyncSender<Message>) {
+        let client = ureq::agent();
+        loop {
+            // read all events off the queue
+            let events = self.get_events_from_queue();
+
+            let mut no_messages = events.is_empty();
+
+            // make request to server
+            let commands = self.send_events(&client, &events);
+
+            if let Some(commands) = commands {
+                no_messages = no_messages && commands.is_empty();
+                if !commands.is_empty() {
+                    info!("received {} commands from remote", commands.len());
+                }
+                for command in commands {
+                    if let Err(err) = sender.send(command) {
+                        error!("failed to send remote error to bus {:?}", err);
+                    }
+                }
+            }
+
+            // sleep for poll interval
+            let sleep = if no_messages { 5 } else { 1 };
+            thread::sleep(time::Duration::from_secs(sleep));
+        }
+    }
+
+    fn get_events_from_queue(&mut self) -> Vec<Message> {
+        self.receiver.try_iter().collect::<Vec<Message>>()
+    }
+
+    fn send_events(&self, client: &ureq::Agent, events: &[Message]) -> Option<Vec<Message>> {
         let mut tries = 5;
         while tries > 0 {
             // make request to server
             let resp = client
-                .post(url)
+                .post(&self.url)
                 .set("Content-Type", "application/json")
-                .auth_kind("Bearer", &token)
+                .auth_kind("Bearer", &self.token)
                 .send_json(serde_json::to_value(&events).unwrap());
 
             if resp.ok() {
@@ -282,57 +373,11 @@ impl WebEventHandler {
             } else {
                 error!("Failed to send {} events: {}", events.len(), resp.status());
             }
-            tries = tries - 1;
+            tries -= 1;
         }
         error!("Failed all attempts at sending events");
 
         None
-    }
-}
-
-impl MessageHandler for WebEventHandler {
-    fn start(&mut self, sender: SyncSender<Message>) {
-        let url = self.url.clone();
-        let token = self.token.clone();
-        // TODO: think of a better way of doing this, maybe send out on sender
-        let receiver = self.receiver.take().unwrap();
-
-        thread::spawn(move || {
-            let client = ureq::agent();
-            loop {
-                // read all events off the queue
-                let events = receiver.try_iter().collect::<Vec<Message>>();
-
-                let mut no_messages = events.is_empty();
-
-                // make request to server
-                let commands = WebEventHandler::send_events(&client, &token, &url, &events);
-
-                if let Some(commands) = commands {
-                    no_messages = no_messages && commands.is_empty();
-                    if !commands.is_empty() {
-                        info!("received {} commands from remote", commands.len());
-                    }
-                    for command in commands {
-                        if let Err(err) = sender.send(command) {
-                            error!("failed to send remote error to bus {:?}", err);
-                        }
-                    }
-                }
-
-                // sleep for poll interval
-                let sleep = if no_messages { 5 } else { 1 };
-                thread::sleep(time::Duration::from_secs(sleep));
-            }
-        });
-    }
-
-    fn handle(&mut self, message: &Message, _: &SyncSender<Message>) {
-        if let Payload::Event(_) = message.payload() {
-            if let Err(err) = self.sender.send(message.clone()) {
-                error!("failed to send event to remote worker: {:?}", err);
-            }
-        }
     }
 }
 

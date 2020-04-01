@@ -36,29 +36,26 @@ impl MessageHandler for TPLinkHandler {
                 if let Some((addr, data)) = find_by_alias(&"Heater") {
                     let device = Device::from_data(addr, &data);
 
-                    match device {
-                        Device::HS100(device) => {
+                    if let Device::HS100(device) = device {
+                        device
+                            .switch_on()
+                            .unwrap_or_else(|_err| error!("Failed to switch heater on"));
+                        sender
+                            .send(Message::event(Event::HeaterStarted))
+                            .unwrap_or_else(|_err| error!("Failed to write heater on event"));
+                        let sender = sender.clone();
+                        thread::spawn(move || {
+                            thread::sleep(HEATER_ON_TIME);
+                            // TODO: retry on failure
                             device
-                                .switch_on()
-                                .unwrap_or_else(|_err| error!("Failed to switch heater on"));
+                                .switch_off()
+                                .unwrap_or_else(|_err| error!("Failed to switch heater off"));
                             sender
-                                .send(Message::event(Event::HeaterStarted))
-                                .unwrap_or_else(|_err| error!("Failed to write heater on event"));
-                            let sender = sender.clone();
-                            thread::spawn(move || {
-                                thread::sleep(HEATER_ON_TIME);
-                                // TODO: retry on failure
-                                device
-                                    .switch_off()
-                                    .unwrap_or_else(|_err| error!("Failed to switch heater off"));
-                                sender
-                                    .send(Message::event(Event::HeaterStopped))
-                                    .unwrap_or_else(|_err| {
-                                        error!("Failed to write heater off event")
-                                    });
-                            });
-                        }
-                        _ => {}
+                                .send(Message::event(Event::HeaterStopped))
+                                .unwrap_or_else(|_err| {
+                                    error!("Failed to write heater off event")
+                                });
+                        });
                     }
                 } else {
                     error!("Heater not found");
