@@ -46,7 +46,8 @@ async fn main() -> std::io::Result<()> {
                 CookieSession::signed(&cookie_key)
                     .name("glow")
                     .http_only(true)
-                    .secure(false),
+                    .secure(false)
+                    .max_age(60 * 60 * 24 * 3),
             )
             .data(AppState {
                 token: app_token,
