@@ -53,15 +53,33 @@ pub async fn index(
             );
         }
     }
-    let events = match store::get_latest_events(&conn, 20) {
-        Ok(events) => events,
-        Err(_) => Vec::new(),
-    };
-    let events = events
+    let events = store::get_latest_events(&conn, 20)
+        .or_else(|_| -> rusqlite::Result<Vec<Message>> { Ok(Vec::new()) })
+        .unwrap()
         .iter()
         .map(EventSummary::from)
         .collect::<Vec<EventSummary>>();
     ctx.insert("events", &events);
+
+    use itertools::Itertools;
+    use chrono::Timelike;
+    let measurements = store::get_measurements_since(
+        &conn,
+        Utc::now()
+            .checked_sub_signed(chrono::Duration::hours(24))
+            .unwrap(),
+    )
+    .map_err(|_| error::ErrorInternalServerError("failed getting measurements"))?
+    .iter()
+    .group_by(|event| event.stamp().hour())
+    .into_iter()
+    .map(|(_, group)| {
+        let event = group.last().unwrap();
+        Message::raw(event.stamp(), event.payload().clone())
+    })
+    .map(EventSummary::from)
+    .collect::<Vec<EventSummary>>();
+    ctx.insert("measurements", &measurements);
 
     render(tmpl, "index.html", Some(&ctx))
 }

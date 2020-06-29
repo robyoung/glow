@@ -152,6 +152,16 @@ pub(crate) fn get_latest_measurement(
     }
 }
 
+pub(crate) fn get_measurements_since(
+    conn: &PooledConnection<SqliteConnectionManager>,
+    stamp: DateTime<Utc>,
+) -> Result<Vec<Message>> {
+    Ok(conn.prepare("SELECT stamp, temperature, humidity FROM environment_measurements WHERE stamp >= ? ORDER BY stamp DESC")?
+        .query(params![stamp])?
+        .map(parse_measurement_row)
+        .collect::<Vec<Message>>()?)
+}
+
 fn parse_message_row(row: &Row<'_>) -> Result<Message> {
     let payload_str: String = row.get(1)?;
     match serde_json::from_str(&payload_str) {
@@ -216,24 +226,88 @@ fn insert_message_to(
 mod tests {
     use super::*;
 
+    struct TestDb(String);
+
+    impl Drop for TestDb {
+        fn drop(&mut self) {
+            if let Err(e) = std::fs::remove_file(&self.0) {
+                eprintln!("Failed to drop TestDb {:?}", e);
+            }
+        }
+    }
+
+    fn setup_test_db(name: &str) -> (PooledConnection<SqliteConnectionManager>, TestDb) {
+        let pool = setup_db(name);
+        let conn = pool.get().unwrap();
+
+        (conn, TestDb(name.to_owned()))
+    }
+
     #[test]
     fn dequeue_events_removes_events() {
-        {
-            // arrange
-            let pool = setup_db(&"./test.db");
-            let conn = pool.get().unwrap();
+        // arrange
+        let (conn, _resource) = setup_test_db(&"./test.db");
 
-            // act
-            queue_command(&conn, Command::Stop).unwrap();
-            queue_command(&conn, Command::Stop).unwrap();
+        // act
+        queue_command(&conn, Command::Stop).unwrap();
+        queue_command(&conn, Command::Stop).unwrap();
 
-            let commands1 = dequeue_commands(&conn).unwrap();
-            let commands2 = dequeue_commands(&conn).unwrap();
+        let commands1 = dequeue_commands(&conn).unwrap();
+        let commands2 = dequeue_commands(&conn).unwrap();
 
-            // assert
-            assert_eq!(commands1.len(), 2);
-            assert_eq!(commands2.len(), 0);
-        }
-        std::fs::remove_file("./test.db").unwrap();
+        // assert
+        assert_eq!(commands1.len(), 2);
+        assert_eq!(commands2.len(), 0);
+    }
+
+    #[test]
+    fn test_get_measurements_since() {
+        // arrange
+        let (conn, _resource) = setup_test_db(&"./test1.db");
+
+        vec![
+            ("2012-12-12T12:00:00Z", 10.0),
+            ("2012-12-12T12:10:00Z", 11.0),
+            ("2012-12-12T12:20:00Z", 12.0),
+            ("2012-12-12T12:30:00Z", 13.0),
+            ("2012-12-12T12:40:00Z", 14.0),
+            ("2012-12-12T12:50:00Z", 15.0),
+        ]
+        .iter()
+        .for_each(|&(stamp, temp)| {
+            insert_measurement(
+                &conn,
+                stamp.parse::<DateTime<Utc>>().unwrap(),
+                &Measurement::new(temp, 10.0),
+            )
+            .unwrap();
+        });
+
+        // act
+        let measurements = get_measurements_since(
+            &conn,
+            "2012-12-12T12:20:00Z".parse::<DateTime<Utc>>().unwrap(),
+        )
+        .unwrap();
+
+        // assert
+        assert_eq!(measurements.len(), 4);
+        assert_eq!(
+            measurements,
+            vec![
+                ("2012-12-12T12:50:00Z", 15.0),
+                ("2012-12-12T12:40:00Z", 14.0),
+                ("2012-12-12T12:30:00Z", 13.0),
+                ("2012-12-12T12:20:00Z", 12.0),
+            ]
+            .iter()
+            .map(|(stamp, temp)| {
+                Message::raw(
+                    stamp.parse::<DateTime<Utc>>().unwrap(),
+                    Payload::Event(Event::Measurement(Measurement::new(*temp, 10.0))),
+                )
+            })
+            .collect::<Vec<_>>()
+        );
     }
 }

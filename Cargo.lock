@@ -1041,6 +1041,7 @@ dependencies = [
  "fallible-iterator",
  "futures",
  "glow_events",
+ "itertools",
  "log",
  "r2d2",
  "r2d2_sqlite",
@@ -1212,6 +1213,15 @@ dependencies = [
  "widestring",
  "winapi 0.3.8",
  "winreg",
+]
+
+[[package]]
+name = "itertools"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "284f18f85651fe11e8a991b2adb42cb078325c996ed026d994719efcfca1d54b"
+dependencies = [
+ "either",
 ]
 
 [[package]]

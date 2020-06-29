@@ -4,7 +4,7 @@ use argon2::{self, Config};
 use base64;
 
 fn main() {
-    let command: String = env::args().nth(1).expect("requires a command");
+    let command: String = env::args().nth(1).expect("requires a command [encode|verify]");
     let password: String = env::args().nth(2).expect("requires a password to hash");
     eprintln!("Entered password: {}", password);
 

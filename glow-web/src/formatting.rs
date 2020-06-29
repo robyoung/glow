@@ -52,10 +52,18 @@ pub(crate) struct EventSummary {
     pub icon: String,
     pub icon_colour: String,
     pub stamp: String,
+    pub date: String,
+    pub time: String,
     pub title: String,
     pub detail: String,
     pub event_type: String,
     pub extra: HashMap<String, Value>,
+}
+
+impl From<Message> for EventSummary {
+    fn from(message: Message) -> Self {
+        EventSummary::from(&message)
+    }
 }
 
 impl From<&Message> for EventSummary {
@@ -63,7 +71,9 @@ impl From<&Message> for EventSummary {
         let mut summary = EventSummary::default();
 
         if let Payload::Event(event) = message.payload() {
-            summary.stamp = format!("{}", message.stamp().format("%F %T"));
+            summary.stamp = message.stamp().format("%F %T").to_string();
+            summary.date = message.stamp().format("%Y-%m-%d").to_string();
+            summary.time = message.stamp().format("%H:%M:%S").to_string();
             summary.title = event.title().to_string();
             summary.icon = get_event_icon(event).to_string();
             summary.icon_colour = get_event_icon_colour(event).to_string();
