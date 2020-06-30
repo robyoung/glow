@@ -30,7 +30,7 @@ async fn main() -> std::io::Result<()> {
     ])
     .unwrap();
 
-    let pool = store::setup_db(&db_path);
+    let pool = store::SQLiteStorePool::from_path(&db_path);
 
     EventsMonitor::new(pool.clone()).start();
 

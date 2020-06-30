@@ -2,14 +2,13 @@ use actix_session::Session;
 use actix_web::{error, web, Error, HttpResponse, Responder};
 use argon2;
 use chrono::offset::Utc;
-use r2d2::Pool;
-use r2d2_sqlite::SqliteConnectionManager;
 use serde::Deserialize;
 use serde_json::json;
 
 use glow_events::v2::{Command, Event, Message, Payload};
 
 use crate::formatting::{format_time_since, EventSummary};
+use crate::store::{Store, StorePool};
 use crate::{found, store, AppState};
 
 fn render(
@@ -28,22 +27,26 @@ pub async fn status() -> impl Responder {
 }
 
 pub async fn index(
-    pool: web::Data<Pool<SqliteConnectionManager>>,
+    pool: web::Data<store::SQLiteStorePool>,
     tmpl: web::Data<tera::Tera>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let conn = pool.get().unwrap();
+    let store = pool
+        .get()
+        .map_err(WrappedError::from)?;
+
     let mut ctx = tera::Context::new();
 
     let flash: Option<String> = session
         .get("flash")
         .map_err(|_| error::ErrorInternalServerError("invalid flash message"))?;
+
     if flash.is_some() {
         session.remove("flash");
     }
     ctx.insert("flash", &flash);
 
-    if let Some(message) = store::get_latest_measurement(&conn) {
+    if let Some(message) = store.get_latest_measurement() {
         if let Payload::Event(Event::Measurement(measurement)) = message.payload() {
             ctx.insert("measurement", measurement);
             ctx.insert("temperature", &format!("{:.2}", measurement.temperature));
@@ -53,7 +56,8 @@ pub async fn index(
             );
         }
     }
-    let events = store::get_latest_events(&conn, 20)
+    let events = store
+        .get_latest_events(20)
         .or_else(|_| -> rusqlite::Result<Vec<Message>> { Ok(Vec::new()) })
         .unwrap()
         .iter()
@@ -61,24 +65,20 @@ pub async fn index(
         .collect::<Vec<EventSummary>>();
     ctx.insert("events", &events);
 
-    use itertools::Itertools;
     use chrono::Timelike;
-    let measurements = store::get_measurements_since(
-        &conn,
-        Utc::now()
-            .checked_sub_signed(chrono::Duration::hours(24))
-            .unwrap(),
-    )
-    .map_err(|_| error::ErrorInternalServerError("failed getting measurements"))?
-    .iter()
-    .group_by(|event| event.stamp().hour())
-    .into_iter()
-    .map(|(_, group)| {
-        let event = group.last().unwrap();
-        Message::raw(event.stamp(), event.payload().clone())
-    })
-    .map(EventSummary::from)
-    .collect::<Vec<EventSummary>>();
+    use itertools::Itertools;
+    let measurements = store
+        .get_measurements_since(chrono::Duration::hours(24))
+        .map_err(|_| error::ErrorInternalServerError("failed getting measurements"))?
+        .iter()
+        .group_by(|event| event.stamp().hour())
+        .into_iter()
+        .map(|(_, group)| {
+            let event = group.last().unwrap();
+            Message::raw(event.stamp(), event.payload().clone())
+        })
+        .map(EventSummary::from)
+        .collect::<Vec<EventSummary>>();
     ctx.insert("measurements", &measurements);
 
     render(tmpl, "index.html", Some(&ctx))
@@ -91,30 +91,28 @@ pub struct SetBrightnessForm {
 
 pub async fn set_brightness(
     form: web::Form<SetBrightnessForm>,
-    pool: web::Data<Pool<SqliteConnectionManager>>,
+    pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let conn = pool
+    let store = pool
         .get()
-        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
-    store::queue_command(
-        &conn,
-        Command::SetBrightness(form.brightness as f32 / 100.0),
-    )
-    .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
+        .map_err(WrappedError::from)?;
+    store
+        .queue_command(Command::SetBrightness(form.brightness as f32 / 100.0))
+        .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
     session.set("flash", "set brightness event queued")?;
     Ok(found("/"))
 }
 
 pub async fn list_devices(
-    pool: web::Data<Pool<SqliteConnectionManager>>,
+    pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let conn = pool
+    let store = pool
         .get()
-        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
-
-    store::queue_command(&conn, Command::ListDevices)
+        .map_err(WrappedError::from)?;
+    store
+        .queue_command(Command::ListDevices)
         .map_err(|_| error::ErrorInternalServerError("failed to request device list"))?;
 
     session.set("flash", "list devices request sent")?;
@@ -123,14 +121,14 @@ pub async fn list_devices(
 }
 
 pub async fn run_heater(
-    pool: web::Data<Pool<SqliteConnectionManager>>,
+    pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let conn = pool
+    let store = pool
         .get()
-        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
-
-    let latest_event = store::get_latest_event_like(&conn, &r#"{"TPLink":"RunHeater"}"#)
+        .map_err(WrappedError::from)?;
+    let latest_event = store
+        .get_latest_event_like(&r#"{"TPLink":"RunHeater"}"#)
         .map_err(|_| error::ErrorInternalServerError("failed to get latest heater event"))?;
     let can_run_heater = if let Some(latest_event) = latest_event {
         Utc::now()
@@ -142,7 +140,8 @@ pub async fn run_heater(
     };
 
     if can_run_heater {
-        store::queue_command(&conn, Command::RunHeater)
+        store
+            .queue_command(Command::RunHeater)
             .map_err(|_| error::ErrorInternalServerError("failed to run heater event"))?;
         session.set("flash", "run heater event queued")?;
     } else {
@@ -153,13 +152,14 @@ pub async fn run_heater(
 }
 
 pub async fn stop_device(
-    pool: web::Data<Pool<SqliteConnectionManager>>,
+    pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let conn = pool
+    let store = pool
         .get()
-        .map_err(|_| error::ErrorInternalServerError("cannot get db connection"))?;
-    store::queue_command(&conn, Command::Stop)
+        .map_err(WrappedError::from)?;
+    store
+        .queue_command(Command::Stop)
         .map_err(|_| error::ErrorInternalServerError("failed to stop device"))?;
     session.set("flash", "stop event queued")?;
 
@@ -194,24 +194,43 @@ pub async fn logout(session: Session) -> Result<HttpResponse, Error> {
 }
 
 pub async fn store_events(
-    pool: web::Data<Pool<SqliteConnectionManager>>,
+    pool: web::Data<store::SQLiteStorePool>,
     events: web::Json<Vec<Message>>,
 ) -> impl Responder {
-    let conn = pool.get().unwrap();
-
+    let store = pool
+        .get()
+        .map_err(WrappedError::from)?;
     for event in events.0.iter() {
-        store::insert_event(&conn, event).unwrap();
+        store.add_event(event).unwrap();
         if let Payload::Event(Event::Measurement(measurement)) = event.payload() {
-            store::insert_measurement(&conn, event.stamp(), measurement).unwrap();
+            store.add_measurement(event.stamp(), measurement).unwrap();
         }
     }
-    store::dequeue_commands(&conn)
+    store
+        .dequeue_commands()
         .map(|commands| HttpResponse::Ok().json(commands))
         .map_err(|err| error::ErrorInternalServerError(format!("{}", err)))
 }
 
-pub async fn list_events(pool: web::Data<Pool<SqliteConnectionManager>>) -> impl Responder {
-    let conn = pool.get().unwrap();
+pub async fn list_events(pool: web::Data<store::SQLiteStorePool>) -> Result<HttpResponse, Error> {
+    let store = pool
+        .get()
+        .map_err(WrappedError::from)?;
 
-    HttpResponse::Ok().json(store::get_latest_events(&conn, 20).unwrap())
+    Ok(HttpResponse::Ok().json(store.get_latest_events(20).unwrap()))
+}
+
+#[derive(Debug)]
+struct WrappedError(Error);
+
+impl From<r2d2::Error> for WrappedError {
+    fn from(_: r2d2::Error) -> Self {
+        Self(error::ErrorInternalServerError("cannot get db connection"))
+    }
+}
+
+impl From<WrappedError> for Error {
+    fn from(e: WrappedError) -> Error {
+        e.0
+    }
 }
