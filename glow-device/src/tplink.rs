@@ -52,9 +52,7 @@ impl MessageHandler for TPLinkHandler {
                                 .unwrap_or_else(|_err| error!("Failed to switch heater off"));
                             sender
                                 .send(Message::event(Event::HeaterStopped))
-                                .unwrap_or_else(|_err| {
-                                    error!("Failed to write heater off event")
-                                });
+                                .unwrap_or_else(|_err| error!("Failed to write heater off event"));
                         });
                     }
                 } else {

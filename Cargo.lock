@@ -791,6 +791,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "eyre"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "303f5557cec6943e7d16db154bfd2a39e91ce266c6f74c2ba2af189da47db3d2"
+dependencies = [
+ "indenter",
+]
+
+[[package]]
 name = "failure"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1038,6 +1047,7 @@ dependencies = [
  "base64 0.11.0",
  "chrono",
  "env_logger",
+ "eyre",
  "fallible-iterator",
  "futures",
  "glow_events",
@@ -1184,6 +1194,12 @@ dependencies = [
  "walkdir",
  "winapi-util",
 ]
+
+[[package]]
+name = "indenter"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0bd112d44d9d870a6819eb505d04dd92b5e4d94bb8c304924a0872ae7016fb5"
 
 [[package]]
 name = "indexmap"

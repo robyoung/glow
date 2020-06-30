@@ -16,12 +16,15 @@ use actix_web_httpauth::{
 };
 use futures::future::{ok, Either, Ready};
 
+mod controllers;
 mod formatting;
 mod monitor;
 pub mod routes;
-pub mod store;
+mod store;
+mod view;
 
 pub use crate::monitor::EventsMonitor;
+pub use store::SQLiteStorePool;
 
 pub struct AppState {
     pub token: String,

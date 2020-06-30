@@ -6,7 +6,7 @@ use chrono::offset::Utc;
 use crate::store::{Store, StorePool};
 
 pub struct EventsMonitor<P: StorePool> {
-    pool: P
+    pool: P,
 }
 
 impl<P: StorePool + 'static> EventsMonitor<P> {

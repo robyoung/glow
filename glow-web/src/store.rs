@@ -1,9 +1,10 @@
 use chrono::{offset::Utc, DateTime, Duration};
+use eyre::Result;
 use fallible_iterator::FallibleIterator;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::{self, SqliteConnectionManager};
 use rand::Rng;
-use rusqlite::{types::FromSqlError, Result, Row, NO_PARAMS};
+use rusqlite::{types::FromSqlError, Row, NO_PARAMS};
 
 use glow_events::{
     v2::{Command, Event, Message, Payload},
@@ -37,7 +38,7 @@ pub trait Store {
 pub trait StorePool: std::marker::Unpin {
     type Store: Store;
 
-    fn get(&self) -> std::result::Result<Self::Store, r2d2::Error>;
+    fn get(&self) -> Result<Self::Store>;
 }
 
 pub struct SQLiteStore {
@@ -46,10 +47,7 @@ pub struct SQLiteStore {
 }
 
 impl SQLiteStore {
-    fn new(
-        conn: PooledConnection<SqliteConnectionManager>,
-        now: fn() -> DateTime<Utc>,
-    ) -> Self {
+    fn new(conn: PooledConnection<SqliteConnectionManager>, now: fn() -> DateTime<Utc>) -> Self {
         Self { conn, now }
     }
 }
@@ -125,7 +123,8 @@ impl Store for SQLiteStore {
     }
 
     fn add_event(&self, message: &Message) -> Result<()> {
-        self.conn
+        Ok(self
+            .conn
             .execute(
                 "INSERT INTO events (stamp, payload) VALUES (?1, ?2)",
                 params![
@@ -133,15 +132,16 @@ impl Store for SQLiteStore {
                     serde_json::to_string(message.payload()).unwrap()
                 ],
             )
-            .map(|_| ())
+            .map(|_| ())?)
     }
 
     fn get_latest_events(&self, limit: u32) -> Result<Vec<Message>> {
-        self.conn
+        Ok(self
+            .conn
             .prepare("SELECT stamp, payload FROM events ORDER BY stamp DESC LIMIT ?")?
             .query(&[limit])?
             .map(parse_message_row)
-            .collect()
+            .collect()?)
     }
 
     fn get_latest_event_like(&self, like: &str) -> Result<Option<Message>> {
@@ -160,10 +160,10 @@ impl Store for SQLiteStore {
     }
 
     fn add_measurement(&self, stamp: DateTime<Utc>, measurement: &Measurement) -> Result<()> {
-        self.conn.execute(
+        Ok(self.conn.execute(
             "INSERT INTO environment_measurements (stamp, temperature, humidity) VALUES (?1, ?2, ?3)",
             params![stamp, measurement.temperature, measurement.humidity,],
-        ).map(|_| ())
+        ).map(|_| ())?)
     }
 
     fn get_latest_measurement(&self) -> Option<Message> {
@@ -180,13 +180,10 @@ impl Store for SQLiteStore {
 
     fn get_measurements_since(&self, since: Duration) -> Result<Vec<Message>> {
         let now = self.now;
-        let now = now();
-        let then = now.checked_sub_signed(since).unwrap();
-        eprintln!("now: {:?}, then: {:?}", now, then);
-        self.conn.prepare("SELECT stamp, temperature, humidity FROM environment_measurements WHERE stamp >= ? ORDER BY stamp DESC")?
-            .query(params![then])?
+        Ok(self.conn.prepare("SELECT stamp, temperature, humidity FROM environment_measurements WHERE stamp >= ? ORDER BY stamp DESC")?
+            .query(params![now().checked_sub_signed(since).unwrap()])?
             .map(parse_measurement_row)
-            .collect::<Vec<Message>>()
+            .collect::<Vec<Message>>()?)
     }
 
     fn queue_command(&self, command: Command) -> Result<()> {
@@ -220,7 +217,7 @@ pub struct SQLiteStorePool {
 }
 
 impl SQLiteStorePool {
-    pub fn new(pool: Pool<SqliteConnectionManager>) -> Self {
+    fn new(pool: Pool<SqliteConnectionManager>) -> Self {
         Self {
             pool,
             now: Utc::now,
@@ -234,14 +231,14 @@ impl SQLiteStorePool {
 
 #[cfg(test)]
 impl SQLiteStorePool {
-    pub fn with_now(
+    pub(crate) fn with_now(
         pool: Pool<SqliteConnectionManager>,
         now: fn() -> DateTime<Utc>,
     ) -> Self {
         Self { pool, now }
     }
 
-    pub fn from_path_with_now(path: &str, now: fn() -> DateTime<Utc>) -> Self {
+    pub(crate) fn from_path_with_now(path: &str, now: fn() -> DateTime<Utc>) -> Self {
         Self::with_now(Pool::new(SqliteConnectionManager::file(path)).unwrap(), now)
     }
 }
@@ -249,12 +246,12 @@ impl SQLiteStorePool {
 impl StorePool for SQLiteStorePool {
     type Store = SQLiteStore;
 
-    fn get(&self) -> std::result::Result<Self::Store, r2d2::Error> {
+    fn get(&self) -> Result<Self::Store> {
         Ok(SQLiteStore::new(self.pool.get()?, self.now))
     }
 }
 
-fn parse_message_row(row: &Row<'_>) -> Result<Message> {
+fn parse_message_row(row: &Row<'_>) -> rusqlite::Result<Message> {
     let payload_str: String = row.get(1)?;
     match serde_json::from_str(&payload_str) {
         Ok(payload) => Ok(Message::raw(row.get(0)?, payload)),
@@ -262,7 +259,7 @@ fn parse_message_row(row: &Row<'_>) -> Result<Message> {
     }
 }
 
-fn parse_measurement_row(row: &Row<'_>) -> Result<Message> {
+fn parse_measurement_row(row: &Row<'_>) -> rusqlite::Result<Message> {
     Ok(Message::raw(
         row.get(0)?,
         Payload::Event(Event::Measurement(Measurement::new(
@@ -278,13 +275,13 @@ fn insert_message_to(
     message: &Message,
 ) -> Result<usize> {
     let query = format!("INSERT INTO {} (stamp, payload) VALUES (?1, ?2)", table);
-    conn.execute(
+    Ok(conn.execute(
         query.as_str(),
         params![
             message.stamp(),
             serde_json::to_string(message.payload()).unwrap()
         ],
-    )
+    )?)
 }
 
 #[cfg(test)]
@@ -355,9 +352,7 @@ mod tests {
         });
 
         // act
-        let measurements = store
-            .get_measurements_since(Duration::minutes(30))
-            .unwrap();
+        let measurements = store.get_measurements_since(Duration::minutes(30)).unwrap();
 
         // assert
         assert_eq!(measurements.len(), 3);

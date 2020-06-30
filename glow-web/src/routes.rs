@@ -7,8 +7,9 @@ use serde_json::json;
 
 use glow_events::v2::{Command, Event, Message, Payload};
 
-use crate::formatting::{format_time_since, EventSummary};
+use crate::controllers::{self, ActixSession};
 use crate::store::{Store, StorePool};
+use crate::view::TeraView;
 use crate::{found, store, AppState};
 
 fn render(
@@ -22,6 +23,12 @@ fn render(
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
+fn ok_html(body: eyre::Result<String>) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html")
+        .body(body.map_err(|e| error::ErrorInternalServerError(e))?))
+}
+
 pub async fn status() -> impl Responder {
     HttpResponse::Ok().json(json!({"status": "ok"}))
 }
@@ -31,57 +38,11 @@ pub async fn index(
     tmpl: web::Data<tera::Tera>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let store = pool
-        .get()
-        .map_err(WrappedError::from)?;
+    let store = pool.get().map_err(WrappedError::from)?;
+    let mut view = TeraView::new(&tmpl);
+    let mut session = ActixSession::new(session);
 
-    let mut ctx = tera::Context::new();
-
-    let flash: Option<String> = session
-        .get("flash")
-        .map_err(|_| error::ErrorInternalServerError("invalid flash message"))?;
-
-    if flash.is_some() {
-        session.remove("flash");
-    }
-    ctx.insert("flash", &flash);
-
-    if let Some(message) = store.get_latest_measurement() {
-        if let Payload::Event(Event::Measurement(measurement)) = message.payload() {
-            ctx.insert("measurement", measurement);
-            ctx.insert("temperature", &format!("{:.2}", measurement.temperature));
-            ctx.insert(
-                "measurement_age",
-                &format_time_since(Utc::now(), message.stamp()),
-            );
-        }
-    }
-    let events = store
-        .get_latest_events(20)
-        .or_else(|_| -> rusqlite::Result<Vec<Message>> { Ok(Vec::new()) })
-        .unwrap()
-        .iter()
-        .map(EventSummary::from)
-        .collect::<Vec<EventSummary>>();
-    ctx.insert("events", &events);
-
-    use chrono::Timelike;
-    use itertools::Itertools;
-    let measurements = store
-        .get_measurements_since(chrono::Duration::hours(24))
-        .map_err(|_| error::ErrorInternalServerError("failed getting measurements"))?
-        .iter()
-        .group_by(|event| event.stamp().hour())
-        .into_iter()
-        .map(|(_, group)| {
-            let event = group.last().unwrap();
-            Message::raw(event.stamp(), event.payload().clone())
-        })
-        .map(EventSummary::from)
-        .collect::<Vec<EventSummary>>();
-    ctx.insert("measurements", &measurements);
-
-    render(tmpl, "index.html", Some(&ctx))
+    ok_html(controllers::index(&store, &mut view, &mut session))
 }
 
 #[derive(Deserialize)]
@@ -94,9 +55,7 @@ pub async fn set_brightness(
     pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let store = pool
-        .get()
-        .map_err(WrappedError::from)?;
+    let store = pool.get().map_err(WrappedError::from)?;
     store
         .queue_command(Command::SetBrightness(form.brightness as f32 / 100.0))
         .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
@@ -108,9 +67,7 @@ pub async fn list_devices(
     pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let store = pool
-        .get()
-        .map_err(WrappedError::from)?;
+    let store = pool.get().map_err(WrappedError::from)?;
     store
         .queue_command(Command::ListDevices)
         .map_err(|_| error::ErrorInternalServerError("failed to request device list"))?;
@@ -124,9 +81,7 @@ pub async fn run_heater(
     pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let store = pool
-        .get()
-        .map_err(WrappedError::from)?;
+    let store = pool.get().map_err(WrappedError::from)?;
     let latest_event = store
         .get_latest_event_like(&r#"{"TPLink":"RunHeater"}"#)
         .map_err(|_| error::ErrorInternalServerError("failed to get latest heater event"))?;
@@ -155,9 +110,7 @@ pub async fn stop_device(
     pool: web::Data<store::SQLiteStorePool>,
     session: Session,
 ) -> Result<HttpResponse, Error> {
-    let store = pool
-        .get()
-        .map_err(WrappedError::from)?;
+    let store = pool.get().map_err(WrappedError::from)?;
     store
         .queue_command(Command::Stop)
         .map_err(|_| error::ErrorInternalServerError("failed to stop device"))?;
@@ -197,9 +150,7 @@ pub async fn store_events(
     pool: web::Data<store::SQLiteStorePool>,
     events: web::Json<Vec<Message>>,
 ) -> impl Responder {
-    let store = pool
-        .get()
-        .map_err(WrappedError::from)?;
+    let store = pool.get().map_err(WrappedError::from)?;
     for event in events.0.iter() {
         store.add_event(event).unwrap();
         if let Payload::Event(Event::Measurement(measurement)) = event.payload() {
@@ -213,9 +164,7 @@ pub async fn store_events(
 }
 
 pub async fn list_events(pool: web::Data<store::SQLiteStorePool>) -> Result<HttpResponse, Error> {
-    let store = pool
-        .get()
-        .map_err(WrappedError::from)?;
+    let store = pool.get().map_err(WrappedError::from)?;
 
     Ok(HttpResponse::Ok().json(store.get_latest_events(20).unwrap()))
 }
@@ -223,9 +172,9 @@ pub async fn list_events(pool: web::Data<store::SQLiteStorePool>) -> Result<Http
 #[derive(Debug)]
 struct WrappedError(Error);
 
-impl From<r2d2::Error> for WrappedError {
-    fn from(_: r2d2::Error) -> Self {
-        Self(error::ErrorInternalServerError("cannot get db connection"))
+impl From<eyre::Error> for WrappedError {
+    fn from(e: eyre::Error) -> Self {
+        Self(error::ErrorInternalServerError(e))
     }
 }
 
