@@ -1,34 +1,16 @@
-use actix_session::Session;
-use actix_web::{error, web, Error, HttpResponse, Responder};
-use argon2;
-use chrono::offset::Utc;
-use serde::Deserialize;
+use actix_web::{error, http, web, Error, HttpResponse, Responder};
 use serde_json::json;
 
-use glow_events::v2::{Command, Event, Message, Payload};
+use glow_events::v2::Message;
 
-use crate::controllers::{self, ActixSession};
-use crate::store::{Store, StorePool};
-use crate::view;
-use crate::{found, store, AppState};
-
-fn render(
-    tmpl: web::Data<tera::Tera>,
-    template_name: &str,
-    context: Option<&tera::Context>,
-) -> Result<HttpResponse, Error> {
-    let body = tmpl
-        .render(template_name, context.unwrap_or(&tera::Context::new()))
-        .map_err(|_| error::ErrorInternalServerError("template errror"))?;
-    Ok(HttpResponse::Ok().content_type("text/html").body(body))
-}
-
-/// Wrap a rendered html body in an actix response
-fn ok_html(body: eyre::Result<String>) -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok()
-        .content_type("text/html")
-        .body(body.map_err(|e| error::ErrorInternalServerError(e))?))
-}
+use crate::{
+    controllers,
+    data::{Login, SetBrightness},
+    session::ActixSession,
+    store,
+    view::{TeraView, View},
+    AppState,
+};
 
 pub async fn status() -> impl Responder {
     HttpResponse::Ok().json(json!({"status": "ok"}))
@@ -36,147 +18,103 @@ pub async fn status() -> impl Responder {
 
 pub async fn index(
     store: store::SQLiteStore,
-    mut view: view::TeraView,
+    mut view: TeraView,
     mut session: ActixSession,
 ) -> Result<HttpResponse, Error> {
     ok_html(controllers::index(&store, &mut view, &mut session))
 }
 
-#[derive(Deserialize)]
-pub struct SetBrightnessForm {
-    brightness: u32,
-}
-
 pub async fn set_brightness(
-    form: web::Form<SetBrightnessForm>,
-    pool: web::Data<store::SQLiteStorePool>,
-    session: Session,
+    form: web::Form<SetBrightness>,
+    store: store::SQLiteStore,
+    mut session: ActixSession,
 ) -> Result<HttpResponse, Error> {
-    let store = pool.get().map_err(WrappedError::from)?;
-    store
-        .queue_command(Command::SetBrightness(form.brightness as f32 / 100.0))
-        .map_err(|_| error::ErrorInternalServerError("failed to queue brightness event"))?;
-    session.set("flash", "set brightness event queued")?;
+    map_err(controllers::set_brightness(
+        &store,
+        &mut session,
+        form.brightness as f32 / 100.0,
+    ))?;
+
     Ok(found("/"))
 }
 
 pub async fn list_devices(
-    pool: web::Data<store::SQLiteStorePool>,
-    session: Session,
+    store: store::SQLiteStore,
+    mut session: ActixSession,
 ) -> Result<HttpResponse, Error> {
-    let store = pool.get().map_err(WrappedError::from)?;
-    store
-        .queue_command(Command::ListDevices)
-        .map_err(|_| error::ErrorInternalServerError("failed to request device list"))?;
-
-    session.set("flash", "list devices request sent")?;
+    map_err(controllers::list_devices(&store, &mut session))?;
 
     Ok(found("/"))
 }
 
 pub async fn run_heater(
-    pool: web::Data<store::SQLiteStorePool>,
-    session: Session,
+    store: store::SQLiteStore,
+    mut session: ActixSession,
 ) -> Result<HttpResponse, Error> {
-    let store = pool.get().map_err(WrappedError::from)?;
-    let latest_event = store
-        .get_latest_event_like(&r#"{"TPLink":"RunHeater"}"#)
-        .map_err(|_| error::ErrorInternalServerError("failed to get latest heater event"))?;
-    let can_run_heater = if let Some(latest_event) = latest_event {
-        Utc::now()
-            .signed_duration_since(latest_event.stamp())
-            .num_minutes()
-            > 2
-    } else {
-        true
-    };
-
-    if can_run_heater {
-        store
-            .queue_command(Command::RunHeater)
-            .map_err(|_| error::ErrorInternalServerError("failed to run heater event"))?;
-        session.set("flash", "run heater event queued")?;
-    } else {
-        session.set("flash", "cannot queue run heater event")?;
-    }
+    map_err(controllers::run_heater(&store, &mut session))?;
 
     Ok(found("/"))
 }
 
 pub async fn stop_device(
-    pool: web::Data<store::SQLiteStorePool>,
-    session: Session,
+    store: store::SQLiteStore,
+    mut session: ActixSession,
 ) -> Result<HttpResponse, Error> {
-    let store = pool.get().map_err(WrappedError::from)?;
-    store
-        .queue_command(Command::Stop)
-        .map_err(|_| error::ErrorInternalServerError("failed to stop device"))?;
-    session.set("flash", "stop event queued")?;
+    map_err(controllers::stop_device(&store, &mut session))?;
 
     Ok(found("/"))
 }
 
-pub async fn login(tmpl: web::Data<tera::Tera>) -> impl Responder {
-    render(tmpl, "login.html", None)
-}
-
-#[derive(Deserialize)]
-pub struct LoginForm {
-    password: String,
+pub async fn login(view: TeraView) -> impl Responder {
+    ok_html(view.render("login.html"))
 }
 
 pub async fn do_login(
-    form: web::Form<LoginForm>,
+    form: web::Form<Login>,
     state: web::Data<AppState>,
-    session: Session,
+    session: ActixSession,
 ) -> Result<HttpResponse, Error> {
-    if argon2::verify_encoded(&state.password, form.password.as_bytes()).unwrap() {
-        session.set("authenticated", true)?;
+    if map_err(controllers::sign_in(
+        &session,
+        &state.password,
+        &form.password,
+    ))? {
         Ok(found("/"))
     } else {
         Err(error::ErrorUnauthorized("bad password"))
     }
 }
 
-pub async fn logout(session: Session) -> Result<HttpResponse, Error> {
-    session.set("authenticated", false)?;
+pub async fn logout(session: ActixSession) -> Result<HttpResponse, Error> {
+    map_err(controllers::sign_out(&session))?;
     Ok(found("/login"))
 }
 
 pub async fn store_events(
-    pool: web::Data<store::SQLiteStorePool>,
+    store: store::SQLiteStore,
     events: web::Json<Vec<Message>>,
-) -> impl Responder {
-    let store = pool.get().map_err(WrappedError::from)?;
-    for event in events.0.iter() {
-        store.add_event(event).unwrap();
-        if let Payload::Event(Event::Measurement(measurement)) = event.payload() {
-            store.add_measurement(event.stamp(), measurement).unwrap();
-        }
-    }
-    store
-        .dequeue_commands()
-        .map(|commands| HttpResponse::Ok().json(commands))
-        .map_err(|err| error::ErrorInternalServerError(format!("{}", err)))
+) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::Ok().json(map_err(controllers::store_events(&store, events.0))?))
 }
 
-pub async fn list_events(pool: web::Data<store::SQLiteStorePool>) -> Result<HttpResponse, Error> {
-    let store = pool.get().map_err(WrappedError::from)?;
-
-    Ok(HttpResponse::Ok().json(store.get_latest_events(20).unwrap()))
+pub async fn list_events(store: store::SQLiteStore) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::Ok().json(map_err(controllers::list_events(&store))?))
 }
 
-#[derive(Debug)]
-struct WrappedError(Error);
-
-impl From<eyre::Error> for WrappedError {
-    fn from(e: eyre::Error) -> Self {
-        Self(error::ErrorInternalServerError(e))
-    }
+pub(crate) fn found<B>(location: &str) -> HttpResponse<B> {
+    HttpResponse::Found()
+        .header(http::header::LOCATION, location)
+        .finish()
+        .into_body()
 }
 
-impl From<WrappedError> for Error {
-    fn from(e: WrappedError) -> Error {
-        e.0
-    }
+/// Wrap a rendered html body in an actix response
+fn ok_html(body: eyre::Result<String>) -> Result<HttpResponse, Error> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html")
+        .body(map_err(body)?))
+}
+
+fn map_err<T>(r: eyre::Result<T>) -> Result<T, Error> {
+    r.map_err(|e| error::ErrorInternalServerError(e))
 }

@@ -1,15 +1,15 @@
 use std::convert::TryFrom;
 
-use chrono::Timelike;
-use eyre::{eyre, Result, WrapErr};
-use futures::future::{ok, Ready};
+use chrono::{Timelike, Utc};
+use eyre::{Result, WrapErr};
 use itertools::Itertools;
-use serde::{de::DeserializeOwned, Serialize};
 
-use glow_events::v2::Message;
+use glow_events::v2::{Command, Event, Message, Payload};
 
+use crate::data::{EventSummary, Measurement};
+use crate::session::Session;
 use crate::store::Store;
-use crate::view::{EventSummary, Measurement, View};
+use crate::view::View;
 
 pub(crate) fn index(
     store: &impl Store,
@@ -53,67 +53,88 @@ pub(crate) fn index(
     Ok(view.render("index.html")?)
 }
 
-pub(crate) trait Session {
-    fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>>;
-    fn set<T: Serialize>(&self, key: &str, value: T) -> Result<()>;
-    fn pop<T: DeserializeOwned>(&mut self, key: &str) -> Result<Option<T>>;
-    fn remove(&mut self, key: &str);
+pub(crate) fn set_brightness(
+    store: &impl Store,
+    session: &mut impl Session,
+    brightness: f32,
+) -> Result<()> {
+    store.queue_command(Command::SetBrightness(brightness))?;
+    session.set("flash", "set brightness event was queued")?;
+
+    Ok(())
 }
 
-pub struct ActixSession(actix_session::Session);
+pub(crate) fn list_devices(store: &impl Store, session: &mut impl Session) -> Result<()> {
+    store.queue_command(Command::ListDevices)?;
+    session.set("flash", "list devices request sent")?;
 
-impl ActixSession {
-    pub fn new(session: actix_session::Session) -> Self {
-        ActixSession(session)
+    Ok(())
+}
+
+pub(crate) fn run_heater(store: &impl Store, session: &mut impl Session) -> Result<()> {
+    let latest_event = store
+        .get_latest_event_like(&r#"{"TPLink":"RunHeater"}"#)
+        .wrap_err("failed to get latest heater event")?;
+
+    let can_run_heater = if let Some(latest_event) = latest_event {
+        Utc::now()
+            .signed_duration_since(latest_event.stamp())
+            .num_minutes()
+            > 2
+    } else {
+        true
+    };
+
+    if can_run_heater {
+        store
+            .queue_command(Command::RunHeater)
+            .wrap_err("failed to run heater event")?;
+        session.set("flash", "run heater event queued")?;
+    } else {
+        session.set("flash", "cannot queue run heater event")?;
+    }
+
+    Ok(())
+}
+
+pub(crate) fn stop_device(store: &impl Store, session: &mut impl Session) -> Result<()> {
+    store
+        .queue_command(Command::Stop)
+        .wrap_err("failed to stop device")?;
+    session.set("flash", "stop event queued")?;
+
+    Ok(())
+}
+
+pub(crate) fn sign_in(
+    session: &impl Session,
+    password: &str,
+    entered_password: &str,
+) -> Result<bool> {
+    if argon2::verify_encoded(password, entered_password.as_bytes())? {
+        session.set("authenticated", true)?;
+        Ok(true)
+    } else {
+        Ok(false)
     }
 }
 
-impl actix_web::FromRequest for ActixSession {
-    type Config = ();
-    type Error = actix_web::Error;
-    type Future = Ready<Result<Self, Self::Error>>;
+pub(crate) fn sign_out(session: &impl Session) -> Result<()> {
+    session.set("authenticated", false)
+}
 
-    fn from_request(
-        req: &actix_web::HttpRequest,
-        payload: &mut actix_web::dev::Payload,
-    ) -> Self::Future {
-        {
-            ok(ActixSession(
-                actix_session::Session::from_request(req, payload)
-                    .into_inner()
-                    .unwrap(),
-            ))
+pub(crate) fn store_events(store: &impl Store, events: Vec<Message>) -> Result<Vec<Message>> {
+    for event in events.iter() {
+        store.add_event(event).unwrap();
+        if let Payload::Event(Event::Measurement(measurement)) = event.payload() {
+            store.add_measurement(event.stamp(), measurement).unwrap();
         }
     }
+    store.dequeue_commands()
 }
 
-impl Session for ActixSession {
-    fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        Ok(self
-            .0
-            .get(key)
-            .map_err(|e| eyre!("failed to de-serialize session: {}", e))?)
-    }
-
-    fn set<T: Serialize>(&self, key: &str, value: T) -> Result<()> {
-        Ok(self
-            .0
-            .set(key, value)
-            .map_err(|e| eyre!("failed to serialize session: {}", e))?)
-    }
-
-    fn pop<T: DeserializeOwned>(&mut self, key: &str) -> Result<Option<T>> {
-        Ok(if let Some(value) = self.get(key)? {
-            self.remove(key);
-            Some(value)
-        } else {
-            None
-        })
-    }
-
-    fn remove(&mut self, key: &str) {
-        self.0.remove(key)
-    }
+pub(crate) fn list_events(store: &impl Store) -> Result<Vec<Message>> {
+    store.get_latest_events(20)
 }
 
 #[cfg(test)]
