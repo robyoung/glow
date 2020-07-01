@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
+use std::{convert::TryFrom, sync::Arc};
 
 use crate::formatting::format_time_since;
 use chrono::Utc;
 use eyre::{eyre, Result};
+use futures::future::{err, ok, Ready};
 use glow_events::v2::{Event, Message, Payload};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
@@ -15,13 +16,13 @@ pub(crate) trait View {
     fn render(&self, template: &str) -> Result<String>;
 }
 
-pub(crate) struct TeraView<'a> {
-    tera: &'a tera::Tera,
+pub struct TeraView {
+    tera: Arc<tera::Tera>,
     ctx: tera::Context,
 }
 
-impl<'a> TeraView<'a> {
-    pub(crate) fn new(tera: &'a tera::Tera) -> Self {
+impl TeraView {
+    pub(crate) fn new(tera: Arc<tera::Tera>) -> Self {
         Self {
             tera,
             ctx: tera::Context::new(),
@@ -29,7 +30,26 @@ impl<'a> TeraView<'a> {
     }
 }
 
-impl<'a> View for TeraView<'a> {
+impl actix_web::FromRequest for TeraView {
+    type Config = ();
+    type Error = actix_web::Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(
+        req: &actix_web::HttpRequest,
+        _payload: &mut actix_web::dev::Payload,
+    ) -> Self::Future {
+        if let Some(tmpl) = req.app_data::<actix_web::web::Data<tera::Tera>>() {
+            ok(TeraView::new(tmpl.clone().into_inner()))
+        } else {
+            err(actix_web::error::ErrorInternalServerError(
+                "Could not build template view",
+            ))
+        }
+    }
+}
+
+impl View for TeraView {
     fn insert<T: Serialize + ?Sized, S: Into<String>>(&mut self, key: S, val: &T) {
         self.ctx.insert(key, val)
     }

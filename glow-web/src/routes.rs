@@ -9,7 +9,7 @@ use glow_events::v2::{Command, Event, Message, Payload};
 
 use crate::controllers::{self, ActixSession};
 use crate::store::{Store, StorePool};
-use crate::view::TeraView;
+use crate::view;
 use crate::{found, store, AppState};
 
 fn render(
@@ -23,6 +23,7 @@ fn render(
     Ok(HttpResponse::Ok().content_type("text/html").body(body))
 }
 
+/// Wrap a rendered html body in an actix response
 fn ok_html(body: eyre::Result<String>) -> Result<HttpResponse, Error> {
     Ok(HttpResponse::Ok()
         .content_type("text/html")
@@ -34,14 +35,10 @@ pub async fn status() -> impl Responder {
 }
 
 pub async fn index(
-    pool: web::Data<store::SQLiteStorePool>,
-    tmpl: web::Data<tera::Tera>,
-    session: Session,
+    store: store::SQLiteStore,
+    mut view: view::TeraView,
+    mut session: ActixSession,
 ) -> Result<HttpResponse, Error> {
-    let store = pool.get().map_err(WrappedError::from)?;
-    let mut view = TeraView::new(&tmpl);
-    let mut session = ActixSession::new(session);
-
     ok_html(controllers::index(&store, &mut view, &mut session))
 }
 

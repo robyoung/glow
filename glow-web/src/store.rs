@@ -1,6 +1,8 @@
+use actix_web::FromRequest;
 use chrono::{offset::Utc, DateTime, Duration};
 use eyre::Result;
 use fallible_iterator::FallibleIterator;
+use futures::future::{err, ok, Ready};
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::{self, SqliteConnectionManager};
 use rand::Rng;
@@ -10,6 +12,12 @@ use glow_events::{
     v2::{Command, Event, Message, Payload},
     Measurement,
 };
+
+pub trait StorePool: std::marker::Unpin {
+    type Store: Store;
+
+    fn get(&self) -> Result<Self::Store>;
+}
 
 pub trait Store {
     fn migrate_db(&self);
@@ -35,10 +43,45 @@ pub trait Store {
     fn dequeue_commands(&self) -> Result<Vec<Message>>;
 }
 
-pub trait StorePool: std::marker::Unpin {
-    type Store: Store;
+#[derive(Clone)]
+pub struct SQLiteStorePool {
+    pool: Pool<SqliteConnectionManager>,
+    now: fn() -> DateTime<Utc>,
+}
 
-    fn get(&self) -> Result<Self::Store>;
+impl SQLiteStorePool {
+    fn new(pool: Pool<SqliteConnectionManager>) -> Self {
+        Self {
+            pool,
+            now: Utc::now,
+        }
+    }
+
+    pub fn from_path(path: &str) -> Self {
+        Self::new(Pool::new(SqliteConnectionManager::file(path)).unwrap())
+    }
+}
+
+#[cfg(test)]
+impl SQLiteStorePool {
+    pub(crate) fn with_now(
+        pool: Pool<SqliteConnectionManager>,
+        now: fn() -> DateTime<Utc>,
+    ) -> Self {
+        Self { pool, now }
+    }
+
+    pub(crate) fn from_path_with_now(path: &str, now: fn() -> DateTime<Utc>) -> Self {
+        Self::with_now(Pool::new(SqliteConnectionManager::file(path)).unwrap(), now)
+    }
+}
+
+impl StorePool for SQLiteStorePool {
+    type Store = SQLiteStore;
+
+    fn get(&self) -> Result<Self::Store> {
+        Ok(SQLiteStore::new(self.pool.get()?, self.now))
+    }
 }
 
 pub struct SQLiteStore {
@@ -49,6 +92,28 @@ pub struct SQLiteStore {
 impl SQLiteStore {
     fn new(conn: PooledConnection<SqliteConnectionManager>, now: fn() -> DateTime<Utc>) -> Self {
         Self { conn, now }
+    }
+}
+
+impl FromRequest for SQLiteStore {
+    type Config = ();
+    type Error = actix_web::Error;
+    type Future = Ready<Result<Self, Self::Error>>;
+
+    fn from_request(
+        req: &actix_web::HttpRequest,
+        _payload: &mut actix_web::dev::Payload,
+    ) -> Self::Future {
+        if let Some(store) = req
+            .app_data::<actix_web::web::Data<SQLiteStorePool>>()
+            .and_then(|pool: &actix_web::web::Data<SQLiteStorePool>| pool.get().ok())
+        {
+            ok(store)
+        } else {
+            err(actix_web::error::ErrorInternalServerError(
+                "Could not retrieve SQLite store.",
+            ))
+        }
     }
 }
 
@@ -207,47 +272,6 @@ impl Store for SQLiteStore {
             params![token],
         )?;
         Ok(commands)
-    }
-}
-
-#[derive(Clone)]
-pub struct SQLiteStorePool {
-    pool: Pool<SqliteConnectionManager>,
-    now: fn() -> DateTime<Utc>,
-}
-
-impl SQLiteStorePool {
-    fn new(pool: Pool<SqliteConnectionManager>) -> Self {
-        Self {
-            pool,
-            now: Utc::now,
-        }
-    }
-
-    pub fn from_path(path: &str) -> Self {
-        Self::new(Pool::new(SqliteConnectionManager::file(path)).unwrap())
-    }
-}
-
-#[cfg(test)]
-impl SQLiteStorePool {
-    pub(crate) fn with_now(
-        pool: Pool<SqliteConnectionManager>,
-        now: fn() -> DateTime<Utc>,
-    ) -> Self {
-        Self { pool, now }
-    }
-
-    pub(crate) fn from_path_with_now(path: &str, now: fn() -> DateTime<Utc>) -> Self {
-        Self::with_now(Pool::new(SqliteConnectionManager::file(path)).unwrap(), now)
-    }
-}
-
-impl StorePool for SQLiteStorePool {
-    type Store = SQLiteStore;
-
-    fn get(&self) -> Result<Self::Store> {
-        Ok(SQLiteStore::new(self.pool.get()?, self.now))
     }
 }
 
