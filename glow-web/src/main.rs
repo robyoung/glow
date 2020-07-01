@@ -8,7 +8,7 @@ use base64;
 use env_logger;
 use tera::Tera;
 
-use glow_web::{bearer_validator, routes, store, AppState, CheckLogin, EventsMonitor};
+use glow_web::{bearer_validator, routes, AppState, CheckLogin, EventsMonitor, SQLiteStorePool};
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -30,7 +30,7 @@ async fn main() -> std::io::Result<()> {
     ])
     .unwrap();
 
-    let pool = store::setup_db(&db_path);
+    let pool = SQLiteStorePool::from_path(&db_path);
 
     EventsMonitor::new(pool.clone()).start();
 
