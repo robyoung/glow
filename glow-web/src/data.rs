@@ -14,6 +14,8 @@ pub(crate) struct Measurement {
     temperature: String,
     humidity: String,
     age: String,
+    date: String,
+    time: String,
 }
 
 impl TryFrom<Message> for Measurement {
@@ -25,6 +27,8 @@ impl TryFrom<Message> for Measurement {
                 temperature: format!("{:.2}", measurement.temperature),
                 humidity: format!("{:.2}", measurement.humidity),
                 age: format_time_since(Utc::now(), message.stamp()),
+                date: message.stamp().format("%Y-%m-%d").to_string(),
+                time: message.stamp().format("%H:%M:%S").to_string(),
             })
         } else {
             Err(eyre!("not a measurement"))

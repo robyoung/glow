@@ -30,10 +30,12 @@ impl<P: StorePool + 'static> EventsMonitor<P> {
 
 fn is_alarming(store: &impl Store, count: u32) -> bool {
     match store.get_latest_event() {
+        // If we have an event check how recently it was received
         Some(event) => {
             let elapsed = Utc::now().signed_duration_since(event.stamp());
             elapsed > chrono::Duration::minutes(3)
         }
+        // If we have no events check that we've been up for a little while
         None => count > 10,
     }
 }

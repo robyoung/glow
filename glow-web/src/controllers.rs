@@ -46,8 +46,8 @@ pub(crate) fn index(
                 let event = group.last().unwrap();
                 Message::raw(event.stamp(), event.payload().clone())
             })
-            .map(EventSummary::from)
-            .collect::<Vec<EventSummary>>(),
+            .map(Measurement::try_from)
+            .collect::<Result<Vec<Measurement>>>()?,
     );
 
     Ok(view.render("index.html")?)

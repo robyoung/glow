@@ -30,15 +30,26 @@
 
   {% if measurements %}
   <div class="col s12 m6 l6">
-    <ul class="collection blue-grey darken-4">
+    <table class=slim>
+      <thead>
+        <tr>
+          <td>date</td>
+          <td>time</td>
+          <td>temperature</td>
+          <td>humidity</td>
+        </tr>
+      </thead>
+      <tbody>
       {% for event in measurements %}
-      <li class="collection-item avatar blue-grey darken-4">
-        <p>{{ event.date }}</p>
-        <p>{{ event.time }}</p>
-        <p>{{ event.detail }}</p>
-      </li>
+      <tr>
+        <td>{{ event.date }}</td>
+        <td>{{ event.time }}</td>
+        <td>{{ event.temperature }}</td>
+        <td>{{ event.humidity }}</td>
+      </tr>
       {% endfor %}
-    </ul>
+      </tbody>
+    </table>
   </div>
   {% endif %}
 
