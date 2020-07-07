@@ -1,12 +1,14 @@
-#[deny(clippy::pedantic)]
+#![deny(clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
 #[macro_use]
 extern crate rusqlite;
 
 use actix::Actor;
-use actix_web::{middleware::Logger, App, HttpServer, web};
-use tera::{Tera, Result as TeraResult};
 use actix_session::CookieSession;
+use actix_web::{middleware::Logger, web, App, HttpServer};
 use actix_web_httpauth::middleware::HttpAuthentication;
+use tera::{Result as TeraResult, Tera};
 
 use crate::authentication::{bearer_validator, CheckLogin};
 use crate::data::AppData;
@@ -27,8 +29,11 @@ mod view;
 #[cfg(feature = "weather-monitor")]
 mod weather;
 
-
 /// Run the Glow web server
+///
+/// # Errors
+///
+/// Will return `Err` if actix-web exits with an io error.
 pub async fn run_server() -> std::io::Result<()> {
     let env = EnvironmentData::load();
     let tera = templates().expect("Could not load templates");

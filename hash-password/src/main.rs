@@ -1,7 +1,6 @@
 use std::env;
 
 use argon2::{self, Config};
-use base64;
 
 fn main() {
     let command: String = env::args()

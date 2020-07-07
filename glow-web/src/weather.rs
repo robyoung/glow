@@ -14,7 +14,7 @@ use eyre::{eyre, Error, Result, WrapErr};
 use hyper::body::HttpBody as _;
 use hyper::Client;
 use lazy_static::lazy_static;
-use log::{info, error};
+use log::{error, info};
 use regex::Regex;
 
 use crate::store::StorePool;
@@ -32,8 +32,12 @@ impl<P: StorePool + 'static, W: WeatherService + 'static> WeatherMonitor<P, W> {
 
     async fn update(self) {
         match self.weather.observation().await {
-            Ok(observation) => { info!("Received weather observation: {:?}", observation); }
-            Err(err) => { error!("Failed to get weather observation: {:?}", err); }
+            Ok(observation) => {
+                info!("Received weather observation: {:?}", observation);
+            }
+            Err(err) => {
+                error!("Failed to get weather observation: {:?}", err);
+            }
         }
     }
 }
@@ -149,57 +153,54 @@ impl<G: UrlGetter> BBCWeatherService<G> {
         let url = BBC_WEATHER_OBSERVATION_URL.to_owned();
         url + &self.location
     }
+}
 
-    fn parse_description(
-        &self,
-        parts: &HashMap<&str, &str>,
-    ) -> Result<(u32, u32, u32, WindDirection)> {
-        lazy_static! {
-            static ref RE: Regex = Regex::new(concat!(
-                r"^Temperature: (\d+)°C \(\d+°F\), ",
-                r"Wind Direction: ([\w ]+), Wind Speed: (\d+)mph, ",
-                r"Humidity: (\d+)%, ",
-                r"Pressure: -- mb, (?:Not available)?, Visibility: --$"
-            ))
-            .unwrap();
-        }
-
-        let description = parts
-            .get("description")
-            .ok_or(eyre!("'description' not found"))?;
-        let captures = RE.captures(description).ok_or(eyre!(
-            "'description' did not match pattern: {}",
-            description
-        ))?;
-
-        Ok((
-            captures.get(1).unwrap().as_str().parse::<u32>()?,
-            captures.get(4).unwrap().as_str().parse::<u32>()?,
-            captures.get(3).unwrap().as_str().parse::<u32>()?,
-            captures.get(2).unwrap().as_str().parse::<WindDirection>()?,
+#[allow(clippy::non_ascii_literal)]
+fn parse_description(parts: &HashMap<&str, &str>) -> Result<(u32, u32, u32, WindDirection)> {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(concat!(
+            r"^Temperature: (\d+)°C \(\d+°F\), ",
+            r"Wind Direction: ([\w ]+), Wind Speed: (\d+)mph, ",
+            r"Humidity: (\d+)%, ",
+            r"Pressure: -- mb, (?:Not available)?, Visibility: --$"
         ))
+        .unwrap();
     }
 
-    fn parse_date(&self, parts: &HashMap<&str, &str>) -> Result<DateTime<Utc>> {
-        Ok(parts
-            .get("date")
-            .ok_or(eyre!("'date' not found"))?
-            .parse::<DateTime<Utc>>()?)
-    }
+    let description = parts
+        .get("description")
+        .ok_or_else(|| eyre!("'description' not found"))?;
+    let captures = RE
+        .captures(description)
+        .ok_or_else(|| eyre!("'description' did not match pattern: {}", description))?;
 
-    fn parse_point(&self, parts: &HashMap<&str, &str>) -> Result<(f32, f32)> {
-        let coords = parts
-            .get("point")
-            .ok_or(eyre!("'point' not found"))?
-            .split(" ")
-            .map(|p| p.parse::<f32>().map_err(Error::from))
-            .collect::<Result<Vec<f32>>>()?;
+    Ok((
+        captures.get(1).unwrap().as_str().parse::<u32>()?,
+        captures.get(4).unwrap().as_str().parse::<u32>()?,
+        captures.get(3).unwrap().as_str().parse::<u32>()?,
+        captures.get(2).unwrap().as_str().parse::<WindDirection>()?,
+    ))
+}
 
-        if coords.len() == 2 {
-            Ok((coords[0], coords[1]))
-        } else {
-            Err(eyre!("wrong number of points"))
-        }
+fn parse_date(parts: &HashMap<&str, &str>) -> Result<DateTime<Utc>> {
+    Ok(parts
+        .get("date")
+        .ok_or_else(|| eyre!("'date' not found"))?
+        .parse::<DateTime<Utc>>()?)
+}
+
+fn parse_point(parts: &HashMap<&str, &str>) -> Result<(f32, f32)> {
+    let coords = parts
+        .get("point")
+        .ok_or_else(|| eyre!("'point' not found"))?
+        .split(' ')
+        .map(|p| p.parse::<f32>().map_err(Error::from))
+        .collect::<Result<Vec<f32>>>()?;
+
+    if coords.len() == 2 {
+        Ok((coords[0], coords[1]))
+    } else {
+        Err(eyre!("wrong number of points"))
     }
 }
 
@@ -219,26 +220,26 @@ impl<G: UrlGetter> WeatherService for BBCWeatherService<G> {
                     .collect();
         }
 
+        #[allow(clippy::filter_map)]
         let parts = item
             .descendants()
             .filter(|n| n.is_element() && ELEMENT_NAMES.contains(n.tag_name().name()))
             .map(|n| (n.tag_name().name(), n.text().unwrap_or("")))
             .collect::<HashMap<&str, &str>>();
 
-        let (temperature, humidity, wind_speed, wind_direction) = self
-            .parse_description(&parts)
-            .wrap_err("failed to parse description")?;
+        let (temperature, humidity, wind_speed, wind_direction) =
+            parse_description(&parts).wrap_err("failed to parse description")?;
 
         Ok(Observation {
             temperature,
             humidity,
             wind_speed,
             wind_direction,
-            date_time: self.parse_date(&parts).wrap_err("failed to parse date")?,
-            point: self.parse_point(&parts).wrap_err("failed to parse point")?,
+            date_time: parse_date(&parts).wrap_err("failed to parse date")?,
+            point: parse_point(&parts).wrap_err("failed to parse point")?,
             url: parts
                 .get("link")
-                .ok_or(eyre!("Could not build Observation; 'link' not found"))?
+                .ok_or_else(|| eyre!("Could not build Observation; 'link' not found"))?
                 .to_owned()
                 .to_owned(),
         })
@@ -318,10 +319,8 @@ mod tests {
     </item>
   </channel>
 </rss>"#;
-        let service = BBCWeatherService::with_getter(
-            "test",
-            TestUrlGetter::new(data.as_bytes().to_owned()),
-        );
+        let service =
+            BBCWeatherService::with_getter("test", TestUrlGetter::new(data.as_bytes().to_owned()));
 
         let observation = service.observation().await.unwrap();
 

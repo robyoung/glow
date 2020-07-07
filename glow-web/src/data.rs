@@ -81,28 +81,20 @@ impl From<&Message> for EventSummary {
 
 fn get_event_icon(event: &Event) -> &'static str {
     match event {
-        Event::Measurement(_) => "eco",
-        Event::MeasurementFailure => "eco",
+        Event::Measurement(_) | Event::MeasurementFailure => "eco",
         Event::SingleTap => "touch_app",
-        Event::Devices(_) => "settings_remote",
-        Event::HeaterStarted => "settings_remote",
-        Event::HeaterStopped => "settings_remote",
-        Event::LEDBrightness(_) => "brightness_4",
-        Event::LEDColours(_) => "brightness_4",
+        Event::Devices(_) | Event::HeaterStarted | Event::HeaterStopped => "settings_remote",
+        Event::LEDBrightness(_) | Event::LEDColours(_) => "brightness_4",
         Event::Started => "started",
     }
 }
 
 fn get_event_icon_colour(event: &Event) -> &'static str {
     match event {
-        Event::Measurement(_) => "green",
-        Event::MeasurementFailure => "green",
+        Event::Measurement(_) | Event::MeasurementFailure => "green",
         Event::SingleTap => "teal",
-        Event::Devices(_) => "amber",
-        Event::HeaterStarted => "amber",
-        Event::HeaterStopped => "amber",
-        Event::LEDBrightness(_) => "light-blue",
-        Event::LEDColours(_) => "light-blue",
+        Event::Devices(_) | Event::HeaterStarted | Event::HeaterStopped => "amber",
+        Event::LEDBrightness(_) | Event::LEDColours(_) => "light-blue",
         Event::Started => "red",
     }
 }

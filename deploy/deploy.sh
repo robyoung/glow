@@ -30,7 +30,7 @@ build-glow-device() {
 }
 
 build-glow-web() {
-  cargo build --release --package=$PACKAGE
+  (cd $PACKAGE && cargo build --release --features=embedded-templates --target-dir=../target)
 }
 
 check-host() {
