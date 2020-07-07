@@ -30,6 +30,7 @@ const ENVIRONMENT_SENSOR_ERROR_BACKOFF_LIMIT: u64 = 3;
 const ENVIRONMENT_SENSOR_SLEEP: u64 = 30;
 const ENVIRONMENT_SENSOR_MAX_SKIP: u8 = 10;
 
+/// Read the AM2320 temperature and humidity sensor and emit Measurement events
 pub struct EnvironmentSensor {}
 
 struct EnvironmentWorker {
@@ -143,6 +144,7 @@ impl MessageHandler for EnvironmentSensor {
     }
 }
 
+/// Translate interrupts from the vibration sensor into tap events.
 pub struct VibrationSensor {}
 
 impl MessageHandler for VibrationSensor {
@@ -208,6 +210,7 @@ impl MessageHandler for PrintMeasurementHandler {
     }
 }
 
+/// Control the colour LED strip
 pub struct LEDHandler {
     leds: Box<dyn LEDs>,
     colour_range: ColourRange,

@@ -87,6 +87,9 @@ impl fmt::Debug for Colour {
     }
 }
 
+/// A colour and a value
+///
+/// Used to build a ColourRange. The value is the upper bound for this bucket.
 pub struct ColourBucket {
     name: String,
     value: f32,
@@ -137,12 +140,19 @@ impl PartialEq for ColourBucket {
 
 impl Eq for ColourBucket {}
 
+/// A linear range of colours
+///
+/// Given a lower bound, a step and a set of colours we can map any value to our LED array.
 pub struct ColourRange {
     buckets: Vec<ColourBucket>,
     num_pixels: u8,
 }
 
 impl ColourRange {
+    /// Create a new ColourRange
+    ///
+    /// Given a lower bound, a step and a set of colours we can map any float value to our LED
+    /// array.
     pub fn new(lower: f32, step: f32, colours: &[Colour]) -> Result<ColourRange, String> {
         if colours.is_empty() {
             Err("must have at least one colour".to_string())
@@ -154,6 +164,7 @@ impl ColourRange {
                     ColourBucket::new(colour.name(), lower + (i as f32) * step, colour)
                 })
                 .collect();
+
             Ok(ColourRange {
                 buckets,
                 num_pixels: NUM_PIXELS as u8,
@@ -161,6 +172,7 @@ impl ColourRange {
         }
     }
 
+    /// Get the colours that should be used for each LED.
     pub fn get_pixels(&self, value: f32) -> Vec<Colour> {
         let first = self.buckets.first().unwrap();
         if value <= first.value {
@@ -189,12 +201,16 @@ impl ColourRange {
         unreachable!();
     }
 
+    /// Return colours for all LEDs set to the same colour.
     pub fn all(&self, colour: Colour) -> Vec<Colour> {
         vec![colour; self.num_pixels as usize]
     }
 }
 
 pub trait LEDs {
+    /// Have a party!
+    ///
+    /// Play a short flashing sequence on the LEDs
     fn party(&mut self) -> Result<(), String> {
         let colours = [Colour::red(), Colour::green(), Colour::blue()];
         let mut current_colours = [Colour::black(); NUM_PIXELS as usize];
@@ -209,6 +225,7 @@ pub trait LEDs {
         Ok(())
     }
 
+    /// Update the LEDs.
     fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String>;
 }
 
