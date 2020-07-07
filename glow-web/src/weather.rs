@@ -18,6 +18,7 @@ use log::{error, info};
 use regex::Regex;
 
 use crate::store::StorePool;
+use futures::join;
 
 #[derive(Clone)]
 pub struct WeatherMonitor<P: StorePool, W: WeatherService> {
@@ -31,12 +32,23 @@ impl<P: StorePool + 'static, W: WeatherService + 'static> WeatherMonitor<P, W> {
     }
 
     async fn update(self) {
-        match self.weather.observation().await {
+        let (observation, forecast) = join!(self.weather.observation(), self.weather.forecast());
+
+        match observation {
             Ok(observation) => {
                 info!("Received weather observation: {:?}", observation);
             }
             Err(err) => {
                 error!("Failed to get weather observation: {:?}", err);
+            }
+        }
+
+        match forecast {
+            Ok(forecast) => {
+                info!("Received weather forecast: {:?}", forecast);
+            }
+            Err(err) => {
+                error!("Failed to get weather forecast: {:?}", err);
             }
         }
     }
@@ -105,9 +117,21 @@ impl FromStr for WindDirection {
 
 pub type Coord = (f32, f32);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Observation {
     pub temperature: u32,
+    pub humidity: u32,
+    pub wind_speed: u32,
+    pub wind_direction: WindDirection,
+    pub date_time: DateTime<Utc>,
+    pub point: Coord,
+    pub url: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct Forecast {
+    pub max_temperature: Option<u32>,
+    pub min_temperature: u32,
     pub humidity: u32,
     pub wind_speed: u32,
     pub wind_direction: WindDirection,
@@ -119,7 +143,7 @@ pub struct Observation {
 #[async_trait]
 pub trait WeatherService: Unpin + Clone {
     async fn observation(&self) -> Result<Observation>;
-    async fn forecast(&self);
+    async fn forecast(&self) -> Result<[Forecast; 3]>;
 }
 
 #[derive(Clone)]
@@ -130,6 +154,8 @@ pub struct BBCWeatherService<G: UrlGetter> {
 
 const BBC_WEATHER_OBSERVATION_URL: &str =
     "https://weather-broker-cdn.api.bbci.co.uk/en/observation/rss/";
+const BBC_WEATHER_FORECAST_URL: &str =
+    "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/";
 
 impl BBCWeatherService<HyperUrlGetter> {
     pub fn new(location: &str) -> Self {
@@ -153,16 +179,116 @@ impl<G: UrlGetter> BBCWeatherService<G> {
         let url = BBC_WEATHER_OBSERVATION_URL.to_owned();
         url + &self.location
     }
+
+    fn forecast_url(&self) -> String {
+        let url = BBC_WEATHER_FORECAST_URL.to_owned();
+        url + &self.location
+    }
+}
+
+lazy_static! {
+    static ref ELEMENT_NAMES: HashSet<&'static str> = vec!["description", "date", "link", "point"]
+        .iter()
+        .cloned()
+        .collect();
+}
+
+#[async_trait]
+impl<G: UrlGetter> WeatherService for BBCWeatherService<G> {
+    #[allow(clippy::filter_map)]
+    async fn observation(&self) -> Result<Observation> {
+        let data = self.getter.get(&self.observation_url()).await?;
+
+        let doc = roxmltree::Document::parse(std::str::from_utf8(&data)?)?;
+
+        doc.descendants()
+            // keeping filter and map separate here is clearer
+            .filter(|n| n.has_tag_name("item"))
+            .map(|item| {
+                item.descendants()
+                    .filter(|n| n.is_element() && ELEMENT_NAMES.contains(n.tag_name().name()))
+                    .map(|n| (n.tag_name().name(), n.text().unwrap_or("")))
+                    .collect::<HashMap<&str, &str>>()
+            })
+            .map(|parts| -> Result<Observation> {
+                let (temperature, humidity, wind_speed, wind_direction) =
+                    parse_observation_description(&parts)
+                        .wrap_err("failed to parse description")?;
+
+                Ok(Observation {
+                    temperature,
+                    humidity,
+                    wind_speed,
+                    wind_direction,
+                    date_time: parse_date(&parts).wrap_err("failed to parse date")?,
+                    point: parse_point(&parts).wrap_err("failed to parse point")?,
+                    url: parts
+                        .get("link")
+                        .ok_or_else(|| eyre!("Could not build Observation; 'link' not found"))?
+                        .to_owned()
+                        .to_owned(),
+                })
+            })
+            .next()
+            .ok_or_else(|| eyre!("no observation found"))?
+    }
+
+    #[allow(clippy::filter_map)]
+    async fn forecast(&self) -> Result<[Forecast; 3]> {
+        let data = self.getter.get(&self.forecast_url()).await?;
+
+        let doc = roxmltree::Document::parse(std::str::from_utf8(&data)?)?;
+        let mut items = doc
+            .descendants()
+            // keeping filter and map separate here is clearer
+            .filter(|node| node.has_tag_name("item"))
+            .map(|item| {
+                item.descendants()
+                    .filter(|node| {
+                        node.is_element() && ELEMENT_NAMES.contains(node.tag_name().name())
+                    })
+                    .map(|node| (node.tag_name().name(), node.text().unwrap_or("")))
+                    .collect::<HashMap<&str, &str>>()
+            })
+            .map(|parts| -> Result<Forecast> {
+                let (max_temperature, min_temperature, humidity, wind_speed, wind_direction) =
+                    parse_forecast_description(&parts).wrap_err("failed to parse description")?;
+
+                Ok(Forecast {
+                    min_temperature,
+                    max_temperature,
+                    humidity,
+                    wind_speed,
+                    wind_direction,
+                    date_time: parse_date(&parts).wrap_err("failed to parse date")?,
+                    point: parse_point(&parts).wrap_err("failed to parse point")?,
+                    url: parts
+                        .get("link")
+                        .ok_or_else(|| eyre!("Could not build Observation; 'link' not found"))?
+                        .to_owned()
+                        .to_owned(),
+                })
+            })
+            .collect::<Result<Vec<Forecast>>>()?;
+
+        if items.len() == 3 {
+            // Can't seem to get TryInto working because Forecast isn't Copy
+            Ok([items.remove(0), items.remove(0), items.remove(0)])
+        } else {
+            Err(eyre!("wrong number of items found: {}", items.len()))
+        }
+    }
 }
 
 #[allow(clippy::non_ascii_literal)]
-fn parse_description(parts: &HashMap<&str, &str>) -> Result<(u32, u32, u32, WindDirection)> {
+fn parse_observation_description(
+    parts: &HashMap<&str, &str>,
+) -> Result<(u32, u32, u32, WindDirection)> {
     lazy_static! {
         static ref RE: Regex = Regex::new(concat!(
             r"^Temperature: (\d+)°C \(\d+°F\), ",
             r"Wind Direction: ([\w ]+), Wind Speed: (\d+)mph, ",
-            r"Humidity: (\d+)%, ",
-            r"Pressure: -- mb, (?:Not available)?, Visibility: --$"
+            r"Humidity: (\d+)%,",
         ))
         .unwrap();
     }
@@ -179,6 +305,39 @@ fn parse_description(parts: &HashMap<&str, &str>) -> Result<(u32, u32, u32, Wind
         captures.get(4).unwrap().as_str().parse::<u32>()?,
         captures.get(3).unwrap().as_str().parse::<u32>()?,
         captures.get(2).unwrap().as_str().parse::<WindDirection>()?,
+    ))
+}
+
+#[allow(clippy::non_ascii_literal)]
+fn parse_forecast_description(
+    parts: &HashMap<&str, &str>,
+) -> Result<(Option<u32>, u32, u32, u32, WindDirection)> {
+    lazy_static! {
+        static ref RE: Regex = Regex::new(concat!(
+            r"^(?:Maximum Temperature: (\d+)°C \(\d+°F\), )?",
+            r"Minimum Temperature: (\d+)°C \(\d+°F\), ",
+            r"Wind Direction: ([\w ]+), Wind Speed: (\d+)mph, ",
+            r"Visibility: [^,]*, Pressure: \d+mb, ",
+            r"Humidity: (\d+)%,",
+        ))
+        .unwrap();
+    }
+    let description = parts
+        .get("description")
+        .ok_or_else(|| eyre!("'description' not found"))?;
+    let captures = RE
+        .captures(description)
+        .ok_or_else(|| eyre!("'description' did not match pattern: {}", description))?;
+
+    Ok((
+        captures
+            .get(1)
+            .map(|v| v.as_str().parse::<u32>())
+            .transpose()?,
+        captures.get(2).unwrap().as_str().parse::<u32>()?,
+        captures.get(5).unwrap().as_str().parse::<u32>()?,
+        captures.get(4).unwrap().as_str().parse::<u32>()?,
+        captures.get(3).unwrap().as_str().parse::<WindDirection>()?,
     ))
 }
 
@@ -202,50 +361,6 @@ fn parse_point(parts: &HashMap<&str, &str>) -> Result<(f32, f32)> {
     } else {
         Err(eyre!("wrong number of points"))
     }
-}
-
-#[async_trait]
-impl<G: UrlGetter> WeatherService for BBCWeatherService<G> {
-    async fn observation(&self) -> Result<Observation> {
-        let data = self.getter.get(&self.observation_url()).await?;
-
-        let doc = roxmltree::Document::parse(std::str::from_utf8(&data)?)?;
-        let item = doc.descendants().find(|n| n.has_tag_name("item")).unwrap();
-
-        lazy_static! {
-            static ref ELEMENT_NAMES: HashSet<&'static str> =
-                vec!["description", "date", "link", "point"]
-                    .iter()
-                    .cloned()
-                    .collect();
-        }
-
-        #[allow(clippy::filter_map)]
-        let parts = item
-            .descendants()
-            .filter(|n| n.is_element() && ELEMENT_NAMES.contains(n.tag_name().name()))
-            .map(|n| (n.tag_name().name(), n.text().unwrap_or("")))
-            .collect::<HashMap<&str, &str>>();
-
-        let (temperature, humidity, wind_speed, wind_direction) =
-            parse_description(&parts).wrap_err("failed to parse description")?;
-
-        Ok(Observation {
-            temperature,
-            humidity,
-            wind_speed,
-            wind_direction,
-            date_time: parse_date(&parts).wrap_err("failed to parse date")?,
-            point: parse_point(&parts).wrap_err("failed to parse point")?,
-            url: parts
-                .get("link")
-                .ok_or_else(|| eyre!("Could not build Observation; 'link' not found"))?
-                .to_owned()
-                .to_owned(),
-        })
-    }
-
-    async fn forecast(&self) {}
 }
 
 #[async_trait]
@@ -294,28 +409,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn my_test() {
+    async fn get_observation() {
         let data = r#"<?xml version="1.0" encoding="UTF-8"?>
 <rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:georss="http://www.georss.org/georss" version="2.0">
   <channel>
-    <title>BBC Weather - Observations for  Chiswick, GB</title>
-    <link>https://www.bbc.co.uk/weather/2653121</link>
-    <description>Latest observations for Chiswick from BBC Weather, including weather, temperature and wind information</description>
+    <title>BBC Weather - Observations for  Land's End Airport, GB</title>
+    <link>https://www.bbc.co.uk/weather/7668205</link>
+    <description>Latest observations for Land's End Airport from BBC Weather, including weather, temperature and wind information</description>
     <language>en</language>
     <copyright>Copyright: (C) British Broadcasting Corporation, see http://www.bbc.co.uk/terms/additional_rss.shtml for more details</copyright>
-    <pubDate>Mon, 06 Jul 2020 16:00:00 GMT</pubDate>
-    <dc:date>2020-07-06T16:00:00Z</dc:date>
+    <pubDate>Tue, 07 Jul 2020 15:00:00 GMT</pubDate>
+    <dc:date>2020-07-07T15:00:00Z</dc:date>
     <dc:language>en</dc:language>
     <dc:rights>Copyright: (C) British Broadcasting Corporation, see http://www.bbc.co.uk/terms/additional_rss.shtml for more details</dc:rights>
-    <atom:link href="https://weather-service-thunder-broker.api.bbci.co.uk/en/observation/rss/2653121" type="application/rss+xml" rel="self" />
+    <atom:link href="https://weather-service-thunder-broker.api.bbci.co.uk/en/observation/rss/7668205" type="application/rss+xml" rel="self" />
     <item>
-      <title>Monday - 17:00 BST: Not available, 19°C (67°F)</title>
-      <link>https://www.bbc.co.uk/weather/2653121</link>
-      <description>Temperature: 19°C (67°F), Wind Direction: North Westerly, Wind Speed: 8mph, Humidity: 45%, Pressure: -- mb, , Visibility: --</description>
-      <pubDate>Mon, 06 Jul 2020 16:00:00 GMT</pubDate>
-      <guid isPermaLink="false">https://www.bbc.co.uk/weather/2653121-2020-07-06T17:00:00.000+01:00</guid>
-      <dc:date>2020-07-06T16:00:00Z</dc:date>
-      <georss:point>51.4927 -0.258</georss:point>
+      <title>Tuesday - 16:00 BST: Not available, 15°C (59°F)</title>
+      <link>https://www.bbc.co.uk/weather/7668205</link>
+      <description>Temperature: 15°C (59°F), Wind Direction: South Westerly, Wind Speed: 12mph, Humidity: 82%, Pressure: 1022mb, Steady, Visibility: --</description>
+      <pubDate>Tue, 07 Jul 2020 15:00:00 GMT</pubDate>
+      <guid isPermaLink="false">https://www.bbc.co.uk/weather/7668205-2020-07-07T16:00:00.000+01:00</guid>
+      <dc:date>2020-07-07T15:00:00Z</dc:date>
+      <georss:point>50.1028 -5.6706</georss:point>
     </item>
   </channel>
 </rss>"#;
@@ -324,7 +439,67 @@ mod tests {
 
         let observation = service.observation().await.unwrap();
 
-        assert_eq!(observation.temperature, 19);
-        assert_eq!(observation.wind_direction, WindDirection::NorthWesterly);
+        assert_eq!(observation.temperature, 15);
+        assert_eq!(observation.wind_direction, WindDirection::SouthWesterly);
+    }
+
+    #[tokio::test]
+    async fn get_forecast() {
+        let data = r#"<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:georss="http://www.georss.org/georss" version="2.0">
+  <channel>
+    <title>BBC Weather - Forecast for  Land's End Airport, GB</title>
+    <link>https://www.bbc.co.uk/weather/7668205</link>
+    <description>3-day forecast for Land's End Airport from BBC Weather, including weather, temperature and wind information</description>
+    <language>en</language>
+    <copyright>Copyright: (C) British Broadcasting Corporation, see http://www.bbc.co.uk/terms/additional_rss.shtml for more details</copyright>
+    <pubDate>Tue, 07 Jul 2020 15:04:25 GMT</pubDate>
+    <dc:date>2020-07-07T15:04:25Z</dc:date>
+    <dc:language>en</dc:language>
+    <dc:rights>Copyright: (C) British Broadcasting Corporation, see http://www.bbc.co.uk/terms/additional_rss.shtml for more details</dc:rights>
+    <atom:link href="https://weather-broker-cdn.api.bbci.co.uk/%s/forecast/rss/3day/%s" type="application/rss+xml" rel="self" />
+    <image>
+      <title>BBC Weather - Forecast for  Land's End Airport, GB</title>
+      <url>http://static.bbci.co.uk/weather/0.3.203/images/icons/individual_57_icons/en_on_light_bg/3.gif</url>
+      <link>https://www.bbc.co.uk/weather/7668205</link>
+    </image>
+    <item>
+      <title>Today: Sunny Intervals, Minimum Temperature: 13°C (56°F) Maximum Temperature: 16°C (61°F)</title>
+      <link>https://www.bbc.co.uk/weather/7668205?day=0</link>
+      <description>Minimum Temperature: 13°C (56°F), Wind Direction: South Westerly, Wind Speed: 18mph, Visibility: Good, Pressure: 1022mb, Humidity: 79%, UV Risk: 5, Pollution: Low, Sunrise: 05:22 BST, Sunset: 21:33 BST</description>
+      <pubDate>Tue, 07 Jul 2020 15:04:25 GMT</pubDate>
+      <guid isPermaLink="false">https://www.bbc.co.uk/weather/7668205-0-2020-07-07T09:57:00.000+0000</guid>
+      <dc:date>2020-07-07T15:04:25Z</dc:date>
+      <georss:point>50.1028 -5.6706</georss:point>
+    </item>
+    <item>
+      <title>Wednesday: Thick Cloud, Minimum Temperature: 14°C (57°F) Maximum Temperature: 16°C (61°F)</title>
+      <link>https://www.bbc.co.uk/weather/7668205?day=1</link>
+      <description>Maximum Temperature: 16°C (61°F), Minimum Temperature: 14°C (57°F), Wind Direction: Westerly, Wind Speed: 17mph, Visibility: Poor, Pressure: 1018mb, Humidity: 97%, UV Risk: 1, Pollution: Low, Sunrise: 05:23 BST, Sunset: 21:32 BST</description>
+      <pubDate>Tue, 07 Jul 2020 15:04:25 GMT</pubDate>
+      <guid isPermaLink="false">https://www.bbc.co.uk/weather/7668205-1-2020-07-07T09:57:00.000+0000</guid>
+      <dc:date>2020-07-07T15:04:25Z</dc:date>
+      <georss:point>50.1028 -5.6706</georss:point>
+    </item>
+    <item>
+      <title>Thursday: Drizzle, Minimum Temperature: 11°C (53°F) Maximum Temperature: 16°C (61°F)</title>
+      <link>https://www.bbc.co.uk/weather/7668205?day=2</link>
+      <description>Maximum Temperature: 16°C (61°F), Minimum Temperature: 11°C (53°F), Wind Direction: Westerly, Wind Speed: 15mph, Visibility: Moderate, Pressure: 1016mb, Humidity: 95%, UV Risk: 1, Pollution: Low, Sunrise: 05:24 BST, Sunset: 21:31 BST</description>
+      <pubDate>Tue, 07 Jul 2020 15:04:25 GMT</pubDate>
+      <guid isPermaLink="false">https://www.bbc.co.uk/weather/7668205-2-2020-07-07T09:57:00.000+0000</guid>
+      <dc:date>2020-07-07T15:04:25Z</dc:date>
+      <georss:point>50.1028 -5.6706</georss:point>
+    </item>
+  </channel>
+</rss>"#;
+
+        let service =
+            BBCWeatherService::with_getter("test", TestUrlGetter::new(data.as_bytes().to_owned()));
+        let forecast = service.forecast().await.unwrap();
+
+        assert_eq!(forecast.len(), 3);
+        assert_eq!(forecast[0].max_temperature, None);
+        assert_eq!(forecast[0].min_temperature, 13);
+        assert_eq!(forecast[1].max_temperature, Some(16));
     }
 }
