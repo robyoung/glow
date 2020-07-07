@@ -1,5 +1,10 @@
 # Glow
 
+[![GitHub Actions][gh-image]][gh-checks]
+
+[gh-image]: https://github.com/robyoung/glow/workflows/CI/badge.svg
+[gh-checks]: https://github.com/robyoung/glow/actions?query=workflow%3ACI
+
 A hacky, connected Raspberry Pi alternative to the [Groegg](https://gro.co.uk/product/groegg-2/).
 The LEDs change colour according to the Gro Company temperature bands.
 
