@@ -13,7 +13,7 @@ use glow_events::{
     Measurement,
 };
 
-pub trait StorePool: std::marker::Unpin {
+pub trait StorePool: std::marker::Unpin + Clone {
     type Store: Store;
 
     fn get(&self) -> Result<Self::Store>;

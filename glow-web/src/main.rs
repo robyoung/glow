@@ -8,7 +8,10 @@ use base64;
 use env_logger;
 use tera::Tera;
 
-use glow_web::{bearer_validator, routes, AppState, CheckLogin, EventsMonitor, SQLiteStorePool};
+use glow_web::{
+    bearer_validator, routes, AppState, BBCWeatherService, CheckLogin, EventsMonitor,
+    SQLiteStorePool, WeatherMonitor,
+};
 
 #[actix_rt::main]
 async fn main() -> std::io::Result<()> {
@@ -22,6 +25,8 @@ async fn main() -> std::io::Result<()> {
     let cookie_key =
         base64::decode(&std::env::var("COOKIE_SECRET").expect("COOKIE_SECRET is required"))
             .expect("COOKIE_SECRET is not valid base64");
+    let weather_location =
+        std::env::var("BBC_WEATHER_LOCATION").expect("BBC_WEATHER_LOCATION is required");
     let mut tera = Tera::new("/dev/null/*").unwrap();
     tera.add_raw_templates(vec![
         ("login.html", include_str!("../templates/login.html")),
@@ -33,6 +38,7 @@ async fn main() -> std::io::Result<()> {
     let pool = SQLiteStorePool::from_path(&db_path);
 
     EventsMonitor::new(pool.clone()).start();
+    WeatherMonitor::new(pool.clone(), BBCWeatherService::new(&weather_location)).start();
 
     HttpServer::new(move || {
         let app_token = app_token.clone();
