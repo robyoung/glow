@@ -123,8 +123,8 @@ pub(crate) fn sign_out(session: &impl Session) -> Result<()> {
     session.set("authenticated", false)
 }
 
-pub(crate) fn store_events(store: &impl Store, events: Vec<Message>) -> Result<Vec<Message>> {
-    for event in events.iter() {
+pub(crate) fn store_events(store: &impl Store, events: &[Message]) -> Result<Vec<Message>> {
+    for event in events {
         store.add_event(event).unwrap();
         if let Payload::Event(Event::Measurement(measurement)) = event.payload() {
             store.add_measurement(event.stamp(), measurement).unwrap();

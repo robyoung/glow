@@ -26,6 +26,8 @@ pub trait Store {
 
     fn get_latest_events(&self, limit: u32) -> Result<Vec<Message>>;
 
+    // the point of this method is to swallow the error
+    #[allow(clippy::match_wildcard_for_single_variants)]
     fn get_latest_event(&self) -> Option<Message> {
         match self.get_latest_events(1) {
             Ok(mut events) => events.pop(),
@@ -231,6 +233,8 @@ impl Store for SQLiteStore {
         ).map(|_| ())?)
     }
 
+    // the point of this method is to swallow the error
+    #[allow(clippy::match_wildcard_for_single_variants)]
     fn get_latest_measurement(&self) -> Option<Message> {
         let result = self.conn.query_row(
             "SELECT stamp, temperature, humidity FROM environment_measurements ORDER BY stamp DESC LIMIT 1",

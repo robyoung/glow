@@ -1,5 +1,6 @@
 use chrono::{offset::Utc, DateTime};
 
+#[allow(clippy::shadow_unrelated)]
 pub(crate) fn format_time_since(now: DateTime<Utc>, stamp: DateTime<Utc>) -> String {
     let duration = now.signed_duration_since(stamp);
     let mut parts = Vec::new();

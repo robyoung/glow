@@ -24,6 +24,8 @@ pub async fn index(
     ok_html(controllers::index(&store, &mut view, &mut session))
 }
 
+// brightness will only ever be between 1 and 100
+#[allow(clippy::cast_precision_loss)]
 pub async fn set_brightness(
     form: web::Form<SetBrightness>,
     store: store::SQLiteStore,
@@ -94,7 +96,7 @@ pub async fn store_events(
     store: store::SQLiteStore,
     events: web::Json<Vec<Message>>,
 ) -> Result<HttpResponse, Error> {
-    Ok(HttpResponse::Ok().json(map_err(controllers::store_events(&store, events.0))?))
+    Ok(HttpResponse::Ok().json(map_err(controllers::store_events(&store, &events.0))?))
 }
 
 pub async fn list_events(store: store::SQLiteStore) -> Result<HttpResponse, Error> {
@@ -116,5 +118,5 @@ fn ok_html(body: eyre::Result<String>) -> Result<HttpResponse, Error> {
 }
 
 fn map_err<T>(r: eyre::Result<T>) -> Result<T, Error> {
-    r.map_err(|e| error::ErrorInternalServerError(e))
+    r.map_err(error::ErrorInternalServerError)
 }
