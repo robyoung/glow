@@ -9,8 +9,13 @@ use glow_events::v2::{Event, Message, Payload};
 
 use crate::formatting::format_time_since;
 
+pub struct AppData {
+    pub token: String,
+    pub password: String,
+}
+
 #[derive(Debug, Serialize)]
-pub(crate) struct Measurement {
+pub struct Measurement {
     temperature: String,
     humidity: String,
     age: String,

@@ -11,12 +11,6 @@ pub(crate) trait Session {
 
 pub struct ActixSession(actix_session::Session);
 
-impl ActixSession {
-    pub fn new(session: actix_session::Session) -> Self {
-        ActixSession(session)
-    }
-}
-
 impl actix_web::FromRequest for ActixSession {
     type Config = ();
     type Error = actix_web::Error;

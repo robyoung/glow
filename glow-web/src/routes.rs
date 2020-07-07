@@ -9,7 +9,7 @@ use crate::{
     session::ActixSession,
     store,
     view::{TeraView, View},
-    AppState,
+    AppData,
 };
 
 pub async fn status() -> impl Responder {
@@ -71,7 +71,7 @@ pub async fn login(view: TeraView) -> impl Responder {
 
 pub async fn do_login(
     form: web::Form<Login>,
-    state: web::Data<AppState>,
+    state: web::Data<AppData>,
     session: ActixSession,
 ) -> Result<HttpResponse, Error> {
     if map_err(controllers::sign_in(

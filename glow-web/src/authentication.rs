@@ -12,14 +12,14 @@ use actix_web_httpauth::{
 };
 
 use crate::routes::found;
-use crate::AppState;
+use crate::AppData;
 use futures::future::{ok, Either, Ready};
 
 pub async fn bearer_validator(
     req: ServiceRequest,
     credentials: BearerAuth,
 ) -> Result<ServiceRequest, Error> {
-    if let Some(state) = req.app_data::<AppState>() {
+    if let Some(state) = req.app_data::<AppData>() {
         if state.token == credentials.token() {
             return Ok(req);
         }
