@@ -16,8 +16,9 @@ use hyper::Client;
 use lazy_static::lazy_static;
 use log::{error, info};
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
-use crate::store::StorePool;
+use crate::store::{Store, StorePool};
 use futures::join;
 
 #[derive(Clone)]
@@ -33,24 +34,17 @@ impl<P: StorePool + 'static, W: WeatherService + 'static> WeatherMonitor<P, W> {
 
     async fn update(self) {
         let (observation, forecast) = join!(self.weather.observation(), self.weather.forecast());
-
-        match observation {
-            Ok(observation) => {
-                info!("Received weather observation: {:?}", observation);
-            }
-            Err(err) => {
-                error!("Failed to get weather observation: {:?}", err);
-            }
-        }
-
-        match forecast {
-            Ok(forecast) => {
-                info!("Received weather forecast: {:?}", forecast);
-            }
-            Err(err) => {
-                error!("Failed to get weather forecast: {:?}", err);
-            }
-        }
+        self.pool
+            .get()
+            .and_then(|store| {
+                store.add_observation(&observation?)?;
+                forecast?
+                    .iter()
+                    .map(|forecast| store.add_forecast(forecast))
+                    .collect::<Result<Vec<()>>>()?;
+                Ok(())
+            })
+            .unwrap_or_else(|err| error!("{}", err));
     }
 }
 
@@ -69,7 +63,7 @@ impl<P: StorePool + 'static, W: WeatherService + 'static> Actor for WeatherMonit
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum WindDirection {
     Northerly,
     NorthNorthEasterly,
@@ -117,7 +111,7 @@ impl FromStr for WindDirection {
 
 pub type Coord = (f32, f32);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Observation {
     pub temperature: u32,
     pub humidity: u32,
@@ -128,7 +122,7 @@ pub struct Observation {
     pub url: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Forecast {
     pub max_temperature: Option<u32>,
     pub min_temperature: u32,

@@ -8,6 +8,7 @@ use r2d2_sqlite::{self, SqliteConnectionManager};
 use rand::Rng;
 use rusqlite::{types::FromSqlError, Row, NO_PARAMS};
 
+use crate::weather::{Forecast, Observation};
 use glow_events::{
     v2::{Command, Event, Message, Payload},
     Measurement,
@@ -43,6 +44,9 @@ pub trait Store {
 
     fn queue_command(&self, command: Command) -> Result<()>;
     fn dequeue_commands(&self) -> Result<Vec<Message>>;
+
+    fn add_observation(&self, observation: &Observation) -> Result<()>;
+    fn add_forecast(&self, forecast: &Forecast) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -119,6 +123,7 @@ impl FromRequest for SQLiteStore {
     }
 }
 
+// TODO: tear this up and throw it away, these tables are bonkers!
 impl Store for SQLiteStore {
     fn migrate_db(&self) {
         self.conn
@@ -187,6 +192,21 @@ impl Store for SQLiteStore {
                 params![],
             )
             .expect("Cannot create commands.group_token index");
+
+        self.conn
+            .execute(
+                r#"
+                CREATE TABLE IF NOT EXISTS weather (
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    date_time DATETIME,
+                    url TEXT,
+                    type TEXT,
+                    payload TEXT
+                );
+                "#,
+                params![],
+            )
+            .expect("Cannot create weather table");
     }
 
     fn add_event(&self, message: &Message) -> Result<()> {
@@ -276,6 +296,36 @@ impl Store for SQLiteStore {
             params![token],
         )?;
         Ok(commands)
+    }
+
+    fn add_observation(&self, observation: &Observation) -> Result<()> {
+        Ok(self
+            .conn
+            .execute(
+                "INSERT INTO weather (date_time, url, type, payload) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    observation.date_time,
+                    observation.url,
+                    "observation",
+                    serde_json::to_string(observation).unwrap()
+                ],
+            )
+            .map(|_| ())?)
+    }
+
+    fn add_forecast(&self, forecast: &Forecast) -> Result<()> {
+        Ok(self
+            .conn
+            .execute(
+                "INSERT INTO weather (date_time, url, type, payload) VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    forecast.date_time,
+                    forecast.url,
+                    "forecast",
+                    serde_json::to_string(forecast).unwrap()
+                ],
+            )
+            .map(|_| ())?)
     }
 }
 

@@ -14,7 +14,7 @@ use tera::{Result as TeraResult, Tera};
 use crate::authentication::{bearer_validator, CheckLogin};
 use crate::data::AppData;
 use crate::monitor::EventsMonitor;
-use crate::store::SQLiteStorePool;
+use crate::store::{SQLiteStorePool, Store, StorePool};
 #[cfg(feature = "weather-monitor")]
 use crate::weather::{BBCWeatherService, WeatherMonitor};
 
@@ -39,6 +39,8 @@ pub async fn run_server() -> std::io::Result<()> {
     let env = EnvironmentData::load();
     let tera = templates().expect("Could not load templates");
     let pool = SQLiteStorePool::from_path(&env.db_path);
+
+    pool.get().map(|store| store.migrate_db()).unwrap();
 
     EventsMonitor::new(pool.clone()).start();
     #[cfg(feature = "weather-monitor")]
