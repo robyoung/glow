@@ -9,11 +9,13 @@ am2320 = "0.2.0"
 blinkt = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 embedded-hal = "0.2"
-env_logger = "0.6"
-log = "0.4"
 rppal = { version = "0.11.3", features = ["hal"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tplinker = "0.3"
+tplinker = "0.4"
 ureq = { version = "0.11.3", features = ["json"] }
 glow_events = { path = "../glow_events" }
+
+# logging
+env_logger = "0.6"
+log = "0.4"

@@ -2478,9 +2478,9 @@ checksum = "e987b6bf443f4b5b3b6f38704195592cca41c5bb7aedd3c3693c7081f8289860"
 
 [[package]]
 name = "tplinker"
-version = "0.3.1"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3490d11bd9c1d7541ada7afe751665c2c526136d751a27774681688c6bf9f747"
+checksum = "628380a0b213731cbb2c071bea544fb11e4f8ca7d50004a5763225724e964dde"
 dependencies = [
  "byteorder",
  "clap",
