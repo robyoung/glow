@@ -58,6 +58,15 @@ pub async fn run_heater(
     Ok(found("/"))
 }
 
+pub async fn stop_heater(
+    store: store::SQLiteStore,
+    mut session: ActixSession,
+) -> Result<HttpResponse, Error> {
+    map_err(controllers::stop_heater(&store, &mut session))?;
+
+    Ok(found("/"))
+}
+
 pub async fn stop_device(
     store: store::SQLiteStore,
     mut session: ActixSession,

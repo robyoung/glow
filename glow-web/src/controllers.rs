@@ -88,11 +88,20 @@ pub(crate) fn run_heater(store: &impl Store, session: &mut impl Session) -> Resu
     if can_run_heater {
         store
             .queue_command(Command::RunHeater)
-            .wrap_err("failed to run heater event")?;
+            .wrap_err("failed to queue run heater event")?;
         session.set("flash", "run heater event queued")?;
     } else {
         session.set("flash", "cannot queue run heater event")?;
     }
+
+    Ok(())
+}
+
+pub(crate) fn stop_heater(store: &impl Store, session: &mut impl Session) -> Result<()> {
+    store
+        .queue_command(Command::StopHeater)
+        .wrap_err("failed to queue stop heater event")?;
+    session.set("flash", "stop heater event queued")?;
 
     Ok(())
 }

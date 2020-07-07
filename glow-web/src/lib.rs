@@ -8,6 +8,7 @@ use actix::Actor;
 use actix_session::CookieSession;
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use actix_web_httpauth::middleware::HttpAuthentication;
+use log::info;
 use tera::{Result as TeraResult, Tera};
 
 use crate::authentication::{bearer_validator, CheckLogin};
@@ -85,7 +86,8 @@ pub async fn run_server() -> std::io::Result<()> {
                     .route("/brightness", web::post().to(routes::set_brightness))
                     .route("/list-devices", web::post().to(routes::list_devices))
                     .route("/stop-device", web::post().to(routes::stop_device))
-                    .route("/run-heater", web::post().to(routes::run_heater)),
+                    .route("/run-heater", web::post().to(routes::run_heater))
+                    .route("/stop-heater", web::post().to(routes::stop_heater)),
             )
     })
     .bind("127.0.0.1:8088")?
@@ -95,6 +97,7 @@ pub async fn run_server() -> std::io::Result<()> {
 
 #[cfg(feature = "embedded-templates")]
 fn templates() -> TeraResult<Tera> {
+    info!("Loading embedded templates");
     let templates = vec![
         ("login.html", include_str!("../templates/login.html")),
         ("index.html", include_str!("../templates/index.html")),
@@ -111,6 +114,7 @@ fn templates() -> TeraResult<Tera> {
 
 #[cfg(not(feature = "embedded-templates"))]
 fn templates() -> TeraResult<Tera> {
+    info!("Loading templates from disk");
     Tera::new(concat!(env!("CARGO_MANIFEST_DIR"), "/templates/**/*"))
 }
 
