@@ -1,4 +1,4 @@
-name: Test
+name: CI
 
 on: [pull_request, push]
 
@@ -19,3 +19,22 @@ jobs:
         with:
           command: test
           args: --all-features --no-fail-fast
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          override: true
+          components: rustfmt, clippy
+      - name: Fmt
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: -- --check --color=always
+      - name: Clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
