@@ -1151,6 +1151,7 @@ dependencies = [
 name = "glow_events"
 version = "0.1.0"
 dependencies = [
+ "am2320",
  "chrono",
  "serde",
  "serde_json",

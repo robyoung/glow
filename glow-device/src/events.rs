@@ -1,5 +1,7 @@
 use std::sync::mpsc::{sync_channel, SyncSender};
 
+use log::info;
+
 use glow_events::v2::{Command, Event, Message, Payload};
 
 pub trait MessageHandler {
@@ -30,6 +32,7 @@ pub fn run_loop(mut handlers: Vec<Box<dyn MessageHandler>>) {
             handler.handle(&message, &sender);
         }
         if let Payload::Command(Command::Stop) = message.payload() {
+            info!("Stopping device");
             break;
         }
     }

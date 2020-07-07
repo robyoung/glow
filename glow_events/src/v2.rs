@@ -47,6 +47,7 @@ pub enum Payload {
 pub enum Command {
     ListDevices,
     RunHeater,
+    StopHeater,
     SetBrightness(f32),
     UpdateLEDs,
     RunParty,

@@ -91,7 +91,7 @@ impl EnvironmentWorker {
                             error_count, m
                         );
                     }
-                    return Measurement::new(m.temperature as f64, m.humidity as f64);
+                    return m.into();
                 }
                 Err(err) => {
                     error!("AM232O read error: {:?}", err);
@@ -329,6 +329,7 @@ impl WebEventWorker {
             let mut no_messages = events.is_empty();
 
             // make request to server
+            debug!("sending {} events", events.len());
             let commands = self.send_events(&client, &events);
 
             if let Some(commands) = commands {

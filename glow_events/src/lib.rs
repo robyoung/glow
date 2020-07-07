@@ -30,3 +30,14 @@ impl Measurement {
 pub struct TPLinkDevice {
     pub name: String,
 }
+
+impl From<am2320::Measurement> for Measurement {
+    fn from(m: am2320::Measurement) -> Self {
+        let temperature = m.temperature as f64;
+        let humidity = m.humidity as f64;
+        Self::new(
+            (temperature * 100.0).round() / 100.0,
+            (humidity * 100.0).round() / 100.0,
+        )
+    }
+}
