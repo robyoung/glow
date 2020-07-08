@@ -132,3 +132,122 @@ pub struct SetBrightness {
 pub struct Login {
     pub password: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::{json, value::Value};
+
+    use glow_events::{
+        v2::{Command, Event, Message, Payload},
+        Measurement, TPLinkDevice,
+    };
+
+    use super::EventSummary;
+
+    #[test]
+    fn event_summary() {
+        struct EventSummaryTest {
+            message: Message,
+            detail: &'static str,
+            icon: &'static str,
+            icon_colour: &'static str,
+            extra: HashMap<String, Value>,
+        }
+        impl EventSummaryTest {
+            fn new(
+                message: Message,
+                detail: &'static str,
+                icon: &'static str,
+                icon_colour: &'static str,
+                extra: HashMap<String, Value>,
+            ) -> Self {
+                Self {
+                    message,
+                    detail,
+                    icon,
+                    icon_colour,
+                    extra,
+                }
+            }
+        }
+        let messages = vec![
+            EventSummaryTest::new(
+                Message::new(Payload::Event(Event::Measurement(Measurement::new(
+                    1.1, 2.2,
+                )))),
+                "temperature: 1.10°C humidity: 2.20%",
+                "eco",
+                "green",
+                HashMap::new(),
+            ),
+            EventSummaryTest::new(
+                Message::new(Payload::Event(Event::SingleTap)),
+                "single tap",
+                "touch_app",
+                "teal",
+                HashMap::new(),
+            ),
+            EventSummaryTest::new(
+                Message::new(Payload::Event(Event::Started)),
+                "started",
+                "started",
+                "red",
+                HashMap::new(),
+            ),
+            EventSummaryTest::new(
+                Message::new(Payload::Event(Event::LEDColours(vec![
+                    (123, 123, 123),
+                    (123, 123, 123),
+                    (123, 123, 123),
+                ]))),
+                "colours updated",
+                "brightness_4",
+                "light-blue",
+                [(
+                    String::from("colours"),
+                    json!([
+                        "#7B7B7B".to_string(),
+                        "#7B7B7B".to_string(),
+                        "#7B7B7B".to_string()
+                    ]),
+                )]
+                .iter()
+                .cloned()
+                .collect(),
+            ),
+            EventSummaryTest::new(
+                Message::new(Payload::Event(Event::Devices(vec![TPLinkDevice {
+                    name: "plug".to_string(),
+                }]))),
+                "device list",
+                "settings_remote",
+                "amber",
+                [(
+                    "devices".to_string(),
+                    json!([{"name": "plug".to_string()}]),
+                )]
+                .iter()
+                .cloned()
+                .collect(),
+            ),
+            EventSummaryTest::new(
+                Message::new(Payload::Command(Command::Stop)),
+                "",
+                "",
+                "",
+                HashMap::new(),
+            ),
+        ];
+
+        for message in messages {
+            let summary = EventSummary::from(message.message);
+
+            assert_eq!(summary.detail, message.detail);
+            assert_eq!(summary.icon, message.icon);
+            assert_eq!(summary.icon_colour, message.icon_colour);
+            assert_eq!(summary.extra, message.extra);
+        }
+    }
+}
