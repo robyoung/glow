@@ -47,6 +47,7 @@ pub trait Store {
 
     fn add_observation(&self, observation: &Observation) -> Result<()>;
     fn add_forecast(&self, forecast: &Forecast) -> Result<()>;
+    fn get_observations_since(&self, stamp: Duration) -> Result<Vec<Observation>>;
 }
 
 #[derive(Clone)]
@@ -331,6 +332,28 @@ impl Store for SQLiteStore {
             )
             .map(|_| ())?)
     }
+
+    fn get_observations_since(&self, since: Duration) -> Result<Vec<Observation>> {
+        let now = self.now;
+        Ok(self
+            .conn
+            .prepare(
+                r#"
+                SELECT payload
+                FROM weather
+                WHERE type='observation' AND date_time >= ? ORDER BY date_time DESC
+            "#,
+            )?
+            .query(params![now().checked_sub_signed(since).unwrap()])?
+            .map(parse_observation_row)
+            .collect::<Vec<Observation>>()?)
+    }
+}
+
+fn parse_observation_row(row: &Row<'_>) -> rusqlite::Result<Observation> {
+    let data: String = row.get(0)?;
+    serde_json::from_str(&data)
+        .map_err(|err| -> rusqlite::Error { FromSqlError::Other(Box::new(err)).into() })
 }
 
 fn parse_message_row(row: &Row<'_>) -> rusqlite::Result<Message> {
@@ -373,6 +396,7 @@ pub mod test {
     use rand::prelude::*;
 
     use super::{SQLiteStorePool, Store, StorePool};
+    use crate::weather::{Observation, WindDirection};
     use glow_events::Measurement;
 
     pub struct TestDb {
@@ -398,6 +422,31 @@ pub mod test {
             self.pool().get()
         }
 
+        pub fn add_observations(
+            store: &impl Store,
+            num: u32,
+            from: DateTime<Utc>,
+            until: DateTime<Utc>,
+        ) -> Result<()> {
+            let mut rng = rand::thread_rng();
+
+            let duration = (until - from).num_seconds();
+            let step = duration / num as i64;
+
+            for i in 0..num {
+                store.add_observation(&Observation {
+                    temperature: rng.gen_range(5, 25),
+                    humidity: rng.gen_range(30, 70),
+                    wind_speed: rng.gen_range(0, 15),
+                    wind_direction: WindDirection::NorthNorthWesterly,
+                    date_time: from + Duration::seconds(i as i64 * step),
+                    point: (12.1, 12.2),
+                    url: "https://example.org".to_string(),
+                })?;
+            }
+            Ok(())
+        }
+
         pub fn add_measurements(
             store: &impl Store,
             num: u32,
@@ -407,10 +456,11 @@ pub mod test {
             let mut rng = rand::thread_rng();
 
             let duration = (until - from).num_seconds();
+            let step = duration / num as i64;
 
-            for _ in 0..num {
+            for i in 0..num {
                 store.add_measurement(
-                    from + Duration::seconds(rng.gen_range(0, duration)),
+                    from + Duration::seconds(i as i64 * step),
                     &Measurement::new(rng.gen_range(5.0, 25.0), rng.gen_range(30.0, 70.0)),
                 )?;
             }
@@ -497,5 +547,20 @@ mod tests {
             })
             .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn get_observations_since() {
+        // arrange
+        let db = test::TestDb::default();
+        let store = db.store().unwrap();
+        test::TestDb::add_observations(&store, 100, Utc::now() - Duration::hours(4), Utc::now())
+            .unwrap();
+
+        // act
+        let observations = store.get_observations_since(Duration::minutes(61)).unwrap();
+
+        // assert
+        assert_eq!(observations.len(), 25);
     }
 }

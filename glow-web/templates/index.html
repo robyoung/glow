@@ -28,25 +28,32 @@
   </div>
   {% endif %}
 
-  {% if measurements %}
+  {% if climate_history %}
   <div class="col s12 m6 l6">
     <table class=slim>
       <thead>
         <tr>
-          <td>date</td>
           <td>time</td>
-          <td>temperature</td>
-          <td>humidity</td>
+          <td>internal temperature</td>
+          <td>external temperature</td>
+          <td>internal humidity</td>
+          <td>external humidity</td>
         </tr>
       </thead>
       <tbody>
-      {% for event in measurements %}
+      {% for date in climate_history %}
       <tr>
-        <td>{{ event.date }}</td>
-        <td>{{ event.time }}</td>
-        <td>{{ event.temperature }}</td>
-        <td>{{ event.humidity }}</td>
+        <td colspan="5">{{ date[0] }}</td>
       </tr>
+      {% for observation in date[1] %}
+      <tr>
+        <td>{{ observation.time }}</td>
+        <td>{{ observation.indoor.temperature }}</td>
+        <td>{{ observation.outdoor.temperature }}</td>
+        <td>{{ observation.indoor.humidity }}</td>
+        <td>{{ observation.outdoor.humidity }}</td>
+      </tr>
+      {% endfor %}
       {% endfor %}
       </tbody>
     </table>

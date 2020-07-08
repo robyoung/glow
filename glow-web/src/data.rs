@@ -7,14 +7,14 @@ use serde_json::{json, Value};
 
 use glow_events::v2::{Event, Message, Payload};
 
-use crate::formatting::format_time_since;
+use crate::{formatting::format_time_since, weather::Observation};
 
 pub struct AppData {
     pub token: String,
     pub password: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Measurement {
     pub temperature: String,
     pub humidity: String,
@@ -38,6 +38,58 @@ impl TryFrom<Message> for Measurement {
         } else {
             Err(eyre!("not a measurement"))
         }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClimateMeasurement {
+    pub temperature: String,
+    pub humidity: String,
+}
+
+impl From<Observation> for ClimateMeasurement {
+    fn from(observation: Observation) -> Self {
+        ClimateMeasurement {
+            temperature: observation.temperature.to_string(),
+            humidity: observation.humidity.to_string(),
+        }
+    }
+}
+
+impl TryFrom<Message> for ClimateMeasurement {
+    type Error = eyre::Error;
+
+    fn try_from(message: Message) -> Result<Self, Self::Error> {
+        if let Payload::Event(Event::Measurement(measurement)) = message.payload() {
+            Ok(ClimateMeasurement {
+                temperature: format!("{:.2}", measurement.temperature),
+                humidity: format!("{:.2}", measurement.humidity),
+            })
+        } else {
+            Err(eyre!("not a measurement"))
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClimateObservation {
+    pub indoor: ClimateMeasurement,
+    pub outdoor: ClimateMeasurement,
+    pub date: String,
+    pub time: String,
+}
+
+impl ClimateObservation {
+    pub fn try_from_parts(message: Message, observation: Observation) -> Result<Self> {
+        let date = message.stamp().format("%Y-%m-%d").to_string();
+        let time = message.stamp().format("%H:%M").to_string();
+
+        Ok(Self {
+            indoor: ClimateMeasurement::try_from(message)?,
+            outdoor: ClimateMeasurement::from(observation),
+            date,
+            time,
+        })
     }
 }
 
@@ -224,13 +276,10 @@ mod tests {
                 "device list",
                 "settings_remote",
                 "amber",
-                [(
-                    "devices".to_string(),
-                    json!([{"name": "plug".to_string()}]),
-                )]
-                .iter()
-                .cloned()
-                .collect(),
+                [("devices".to_string(), json!([{"name": "plug".to_string()}]))]
+                    .iter()
+                    .cloned()
+                    .collect(),
             ),
             EventSummaryTest::new(
                 Message::new(Payload::Command(Command::Stop)),

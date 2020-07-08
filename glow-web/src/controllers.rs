@@ -1,12 +1,13 @@
-use std::convert::TryFrom;
+use std::{cmp::Ordering, convert::TryFrom};
 
 use chrono::{Duration, DurationRound, Utc};
-use eyre::{Result, WrapErr};
+use eyre::{eyre, Result, WrapErr};
 use itertools::Itertools;
+use log::debug;
 
 use glow_events::v2::{Command, Event, Message, Payload};
 
-use crate::data::{EventSummary, Measurement};
+use crate::data::{ClimateObservation, EventSummary, Measurement};
 use crate::session::Session;
 use crate::store::Store;
 use crate::view::View;
@@ -34,20 +35,78 @@ pub(crate) fn index(
             .collect::<Vec<EventSummary>>(),
     );
 
+    let then = Duration::hours(24);
+    let mut measurements = store
+        .get_measurements_since(then)
+        .wrap_err("failed getting measurements")?
+        .iter()
+        .group_by(|event| event.stamp().duration_trunc(Duration::hours(1)).unwrap())
+        .into_iter()
+        .map(|(hour, group)| {
+            let event = group.last().unwrap();
+            Message::raw(hour, event.payload().to_owned())
+        })
+        .collect::<Vec<Message>>();
+
+    let mut observations = store
+        .get_observations_since(then)
+        .wrap_err("failed getting weather observations")?
+        .iter()
+        .group_by(|obs| obs.date_time.duration_trunc(Duration::hours(1)).unwrap())
+        .into_iter()
+        .map(|(hour, group)| {
+            let mut obs = group.last().unwrap().clone();
+            obs.date_time = hour;
+            obs
+        })
+        .collect::<Vec<crate::weather::Observation>>();
+
+    loop {
+        match observations[0].date_time.cmp(&measurements[0].stamp()) {
+            Ordering::Less => {
+                debug!("ordering less: {:?}", observations.remove(0));
+            }
+            Ordering::Greater => {
+                debug!("ordering more: {:?}", measurements.remove(0));
+            }
+            Ordering::Equal => {
+                break;
+            }
+        }
+    }
+
+    #[allow(clippy::filter_map)] // keeping them separate makes it clearer in this case
+    let climate = measurements
+        .into_iter()
+        .merge_join_by(observations.into_iter(), |measurement, observation| {
+            measurement.stamp().cmp(&observation.date_time)
+        })
+        .filter_map(|either| match either {
+            itertools::EitherOrBoth::Both(measurement, observation) => {
+                Some((measurement, observation))
+            }
+            _ => None,
+        })
+        .map(|(measurement, observation)| -> Result<ClimateObservation> {
+            if measurement.stamp() == observation.date_time {
+                Ok(ClimateObservation::try_from_parts(
+                    measurement,
+                    observation,
+                )?)
+            } else {
+                Err(eyre!("missing either observations or measurements"))
+            }
+        })
+        .collect::<Result<Vec<ClimateObservation>>>()?;
+
     view.insert(
-        "measurements",
-        &store
-            .get_measurements_since(chrono::Duration::hours(24))
-            .wrap_err("failed getting measurements")?
-            .iter()
-            .group_by(|event| event.stamp().duration_trunc(Duration::hours(1)).unwrap())
+        "climate_history",
+        &climate
             .into_iter()
-            .map(|(hour, group)| {
-                let event = group.last().unwrap();
-                Message::raw(hour, event.payload().clone())
-            })
-            .map(Measurement::try_from)
-            .collect::<Result<Vec<Measurement>>>()?,
+            .group_by(|m| m.date.clone())
+            .into_iter()
+            .map(|(date, summaries)| (date, summaries.collect()))
+            .collect::<Vec<(String, Vec<ClimateObservation>)>>(),
     );
 
     Ok(view.render("index.html")?)
@@ -152,16 +211,18 @@ mod tests {
 
     use crate::session::test::TestSession;
     use crate::store::test::TestDb;
-    use crate::{data::Measurement, view::test::TestView};
+    use crate::{data::ClimateObservation, view::test::TestView};
     use chrono::{Duration, Utc};
 
     #[test]
-    fn index_measurements() {
+    fn index_climate_history() {
         // arrange
         let db = TestDb::default();
         let store = db.store().unwrap();
-        TestDb::add_measurements(&store, 1000, Utc::now() - Duration::hours(36), Utc::now())
-            .unwrap();
+        let until = Utc::now();
+        let since = until - Duration::hours(36);
+        TestDb::add_measurements(&store, 1000, since, until).unwrap();
+        TestDb::add_observations(&store, 1000, since, until).unwrap();
 
         // set up database
         let mut session = TestSession::default();
@@ -171,9 +232,13 @@ mod tests {
         index(&store, &mut view, &mut session).unwrap();
 
         // assert
-        let measurements: Vec<Measurement> = view.get("measurements").unwrap();
+        let climate_history: Vec<(String, Vec<ClimateObservation>)> =
+            view.get("climate_history").unwrap();
 
-        assert_eq!(measurements.len(), 25);
-        assert!(measurements.iter().all(|m| &m.time[2..] == ":00:00"))
+        assert_eq!(climate_history.len(), 2);
+        assert_eq!(climate_history[0].1.len() + climate_history[1].1.len(), 25);
+        assert!(climate_history
+            .iter()
+            .all(|(_, observations)| observations.iter().all(|o| &o.time[2..] == ":00")));
     }
 }
