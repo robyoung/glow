@@ -14,13 +14,13 @@ pub struct AppData {
     pub password: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Measurement {
-    temperature: String,
-    humidity: String,
-    age: String,
-    date: String,
-    time: String,
+    pub temperature: String,
+    pub humidity: String,
+    pub age: String,
+    pub date: String,
+    pub time: String,
 }
 
 impl TryFrom<Message> for Measurement {

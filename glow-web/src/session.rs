@@ -58,3 +58,50 @@ impl Session for ActixSession {
         self.0.remove(key)
     }
 }
+
+#[cfg(test)]
+pub mod test {
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    use eyre::Result;
+    use serde::{de::DeserializeOwned, Serialize};
+
+    use super::Session;
+
+    #[derive(Default)]
+    pub struct TestSession {
+        inner: RefCell<HashMap<String, String>>,
+    }
+
+    impl Session for TestSession {
+        fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+            Ok(self
+                .inner
+                .borrow()
+                .get(key)
+                .map(|val| serde_json::from_str(val))
+                .transpose()?)
+        }
+
+        fn set<T: Serialize>(&self, key: &str, value: T) -> Result<()> {
+            self.inner
+                .borrow_mut()
+                .insert(key.to_owned(), serde_json::to_string(&value)?);
+            Ok(())
+        }
+
+        fn pop<T: DeserializeOwned>(&mut self, key: &str) -> Result<Option<T>> {
+            Ok(self
+                .inner
+                .borrow_mut()
+                .remove(key)
+                .map(|val| serde_json::from_str(&val))
+                .transpose()?)
+        }
+
+        fn remove(&mut self, key: &str) {
+            self.inner.borrow_mut().remove(key);
+        }
+    }
+}

@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use chrono::{Timelike, Utc};
+use chrono::{Duration, DurationRound, Utc};
 use eyre::{Result, WrapErr};
 use itertools::Itertools;
 
@@ -40,11 +40,11 @@ pub(crate) fn index(
             .get_measurements_since(chrono::Duration::hours(24))
             .wrap_err("failed getting measurements")?
             .iter()
-            .group_by(|event| event.stamp().hour())
+            .group_by(|event| event.stamp().duration_trunc(Duration::hours(1)).unwrap())
             .into_iter()
-            .map(|(_, group)| {
+            .map(|(hour, group)| {
                 let event = group.last().unwrap();
-                Message::raw(event.stamp(), event.payload().clone())
+                Message::raw(hour, event.payload().clone())
             })
             .map(Measurement::try_from)
             .collect::<Result<Vec<Measurement>>>()?,
@@ -147,4 +147,33 @@ pub(crate) fn list_events(store: &impl Store) -> Result<Vec<Message>> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::index;
+
+    use crate::session::test::TestSession;
+    use crate::store::test::TestDb;
+    use crate::{data::Measurement, view::test::TestView};
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn index_measurements() {
+        // arrange
+        let db = TestDb::default();
+        let store = db.store().unwrap();
+        TestDb::add_measurements(&store, 1000, Utc::now() - Duration::hours(36), Utc::now())
+            .unwrap();
+
+        // set up database
+        let mut session = TestSession::default();
+        let mut view = TestView::default();
+
+        // act
+        index(&store, &mut view, &mut session).unwrap();
+
+        // assert
+        let measurements: Vec<Measurement> = view.get("measurements").unwrap();
+
+        assert_eq!(measurements.len(), 25);
+        assert!(measurements.iter().all(|m| &m.time[2..] == ":00:00"))
+    }
+}

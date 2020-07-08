@@ -70,6 +70,10 @@ impl SQLiteStorePool {
 
 #[cfg(test)]
 impl SQLiteStorePool {
+    pub(crate) fn memory() -> Self {
+        Self::new(Pool::new(SqliteConnectionManager::memory()).unwrap())
+    }
+
     pub(crate) fn with_now(
         pool: Pool<SqliteConnectionManager>,
         now: fn() -> DateTime<Utc>,
@@ -77,8 +81,8 @@ impl SQLiteStorePool {
         Self { pool, now }
     }
 
-    pub(crate) fn from_path_with_now(path: &str, now: fn() -> DateTime<Utc>) -> Self {
-        Self::with_now(Pool::new(SqliteConnectionManager::file(path)).unwrap(), now)
+    pub(crate) fn memory_with_now(now: fn() -> DateTime<Utc>) -> Self {
+        Self::with_now(Pool::new(SqliteConnectionManager::memory()).unwrap(), now)
     }
 }
 
@@ -363,35 +367,78 @@ fn insert_message_to(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub mod test {
+    use chrono::{DateTime, Duration, Utc};
+    use eyre::Result;
+    use rand::prelude::*;
 
-    struct TestDb(String);
+    use super::{SQLiteStorePool, Store, StorePool};
+    use glow_events::Measurement;
 
-    impl Drop for TestDb {
-        fn drop(&mut self) {
-            if let Err(e) = std::fs::remove_file(&self.0) {
-                eprintln!("Failed to drop TestDb {:?}", e);
+    pub struct TestDb {
+        pool: SQLiteStorePool,
+    }
+
+    impl TestDb {
+        pub fn with_pool(pool: SQLiteStorePool) -> Self {
+            let db = Self { pool };
+            db.store().unwrap().migrate_db();
+            db
+        }
+
+        pub fn with_now(now: fn() -> DateTime<Utc>) -> Self {
+            Self::with_pool(SQLiteStorePool::memory_with_now(now))
+        }
+
+        pub fn pool(&self) -> &SQLiteStorePool {
+            &self.pool
+        }
+
+        pub fn store(&self) -> Result<impl Store> {
+            self.pool().get()
+        }
+
+        pub fn add_measurements(
+            store: &impl Store,
+            num: u32,
+            from: DateTime<Utc>,
+            until: DateTime<Utc>,
+        ) -> Result<()> {
+            let mut rng = rand::thread_rng();
+
+            let duration = (until - from).num_seconds();
+
+            for _ in 0..num {
+                store.add_measurement(
+                    from + Duration::seconds(rng.gen_range(0, duration)),
+                    &Measurement::new(rng.gen_range(5.0, 25.0), rng.gen_range(30.0, 70.0)),
+                )?;
             }
+
+            Ok(())
         }
     }
+
+    impl Default for TestDb {
+        fn default() -> Self {
+            TestDb::with_pool(SQLiteStorePool::memory())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
 
     fn then() -> DateTime<Utc> {
         "2012-12-12T12:00:00Z".parse::<DateTime<Utc>>().unwrap()
     }
 
-    fn setup_test_db(name: &str) -> (impl StorePool, TestDb) {
-        let pool = SQLiteStorePool::from_path_with_now(name, then);
-        pool.get().unwrap().migrate_db();
-
-        (pool, TestDb(name.to_owned()))
-    }
-
     #[test]
     fn dequeue_events_removes_events() {
         // arrange
-        let (pool, _resource) = setup_test_db(&"./test.db");
-        let store = pool.get().unwrap();
+        let db = test::TestDb::with_now(then);
+        let store = db.store().unwrap();
 
         // act
         store.queue_command(Command::Stop).unwrap();
@@ -408,8 +455,8 @@ mod tests {
     #[test]
     fn test_get_measurements_since() {
         // arrange
-        let (pool, _resource) = setup_test_db(&"./test1.db");
-        let store = pool.get().unwrap();
+        let db = test::TestDb::with_now(then);
+        let store = db.store().unwrap();
 
         vec![
             ("2012-12-12T11:00:00Z", 10.0),

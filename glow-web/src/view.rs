@@ -1,12 +1,8 @@
-#[cfg(test)]
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use eyre::Result;
 use futures::future::{err, ok, Ready};
 use serde::Serialize;
-#[cfg(test)]
-use serde_json::value::{to_value, Value};
 
 pub(crate) trait View {
     fn insert<T: Serialize + ?Sized, S: Into<String>>(&mut self, key: S, val: &T);
@@ -57,17 +53,38 @@ impl View for TeraView {
 }
 
 #[cfg(test)]
-struct TestView {
-    ctx: HashMap<String, Value>,
-}
+pub mod test {
+    use std::collections::HashMap;
 
-#[cfg(test)]
-impl View for TestView {
-    fn insert<T: Serialize + ?Sized, S: Into<String>>(&mut self, key: S, val: &T) {
-        self.ctx.insert(key.into(), to_value(val).unwrap());
+    use eyre::Result;
+    use serde::{de::DeserializeOwned, Serialize};
+
+    use super::View;
+
+    #[derive(Default)]
+    pub struct TestView {
+        ctx: HashMap<String, String>,
     }
 
-    fn render(&self, template: &str) -> Result<String> {
-        Ok(template.to_string())
+    impl TestView {
+        pub fn get<T: DeserializeOwned + std::marker::Sized, S: Into<String>>(
+            &self,
+            key: S,
+        ) -> Option<T> {
+            let value = dbg!(self.ctx.get(&key.into()));
+
+            value.map(|val| serde_json::from_str(val).unwrap())
+        }
+    }
+
+    impl View for TestView {
+        fn insert<T: Serialize + ?Sized, S: Into<String>>(&mut self, key: S, val: &T) {
+            self.ctx
+                .insert(key.into(), serde_json::to_string(val).unwrap());
+        }
+
+        fn render(&self, template: &str) -> Result<String> {
+            Ok(template.to_string())
+        }
     }
 }
