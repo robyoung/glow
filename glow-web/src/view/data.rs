@@ -22,8 +22,8 @@ pub struct ClimateMeasurement {
 impl From<data::ClimateMeasurement> for ClimateMeasurement {
     fn from(measurement: data::ClimateMeasurement) -> Self {
         ClimateMeasurement {
-            temperature: measurement.temperature.to_string(),
-            humidity: measurement.humidity.to_string(),
+            temperature: format!("{:.1}", measurement.temperature),
+            humidity: format!("{:.1}", measurement.humidity),
         }
     }
 }
