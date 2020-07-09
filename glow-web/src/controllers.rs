@@ -1,15 +1,14 @@
-use std::{cmp::Ordering, convert::TryFrom};
+use std::convert::TryFrom;
 
-use chrono::{Duration, DurationRound, Utc};
-use eyre::{eyre, Result, WrapErr};
+use chrono::{Duration, Utc};
+use eyre::{Result, WrapErr};
 use itertools::Itertools;
-use log::debug;
 
 use glow_events::v2::{Command, Event, Message, Payload};
 
-use crate::data::{ClimateObservation, EventSummary, Measurement};
 use crate::session::Session;
 use crate::store::Store;
+use crate::view::data::{ClimateObservation, EventSummary, Measurement};
 use crate::view::View;
 
 pub(crate) fn index(
@@ -35,74 +34,12 @@ pub(crate) fn index(
             .collect::<Vec<EventSummary>>(),
     );
 
-    let then = Duration::hours(24);
-    let mut measurements = store
-        .get_measurements_since(then)
-        .wrap_err("failed getting measurements")?
-        .iter()
-        .group_by(|event| event.stamp().duration_trunc(Duration::hours(1)).unwrap())
-        .into_iter()
-        .map(|(hour, group)| {
-            let event = group.last().unwrap();
-            Message::raw(hour, event.payload().to_owned())
-        })
-        .collect::<Vec<Message>>();
-
-    let mut observations = store
-        .get_observations_since(then)
-        .wrap_err("failed getting weather observations")?
-        .iter()
-        .group_by(|obs| obs.date_time.duration_trunc(Duration::hours(1)).unwrap())
-        .into_iter()
-        .map(|(hour, group)| {
-            let mut obs = group.last().unwrap().clone();
-            obs.date_time = hour;
-            obs
-        })
-        .collect::<Vec<crate::weather::Observation>>();
-
-    loop {
-        match observations[0].date_time.cmp(&measurements[0].stamp()) {
-            Ordering::Less => {
-                debug!("ordering less: {:?}", observations.remove(0));
-            }
-            Ordering::Greater => {
-                debug!("ordering more: {:?}", measurements.remove(0));
-            }
-            Ordering::Equal => {
-                break;
-            }
-        }
-    }
-
-    #[allow(clippy::filter_map)] // keeping them separate makes it clearer in this case
-    let climate = measurements
-        .into_iter()
-        .merge_join_by(observations.into_iter(), |measurement, observation| {
-            measurement.stamp().cmp(&observation.date_time)
-        })
-        .filter_map(|either| match either {
-            itertools::EitherOrBoth::Both(measurement, observation) => {
-                Some((measurement, observation))
-            }
-            _ => None,
-        })
-        .map(|(measurement, observation)| -> Result<ClimateObservation> {
-            if measurement.stamp() == observation.date_time {
-                Ok(ClimateObservation::try_from_parts(
-                    measurement,
-                    observation,
-                )?)
-            } else {
-                Err(eyre!("missing either observations or measurements"))
-            }
-        })
-        .collect::<Result<Vec<ClimateObservation>>>()?;
-
     view.insert(
         "climate_history",
-        &climate
+        &store
+            .get_climate_history_since(Duration::hours(24))?
             .into_iter()
+            .map(ClimateObservation::from)
             .group_by(|m| m.date.clone())
             .into_iter()
             .map(|(date, summaries)| (date, summaries.collect()))
@@ -210,17 +147,17 @@ mod tests {
     use super::index;
 
     use crate::session::test::TestSession;
-    use crate::store::test::TestDb;
-    use crate::{data::ClimateObservation, view::test::TestView};
-    use chrono::{Duration, Utc};
+    use crate::store::test::{now, TestDb};
+    use crate::{view::data::ClimateObservation, view::test::TestView};
+    use chrono::Duration;
 
     #[test]
     fn index_climate_history() {
         // arrange
-        let db = TestDb::default();
+        let db = TestDb::with_now(now);
         let store = db.store().unwrap();
-        let until = Utc::now();
-        let since = until - Duration::hours(36);
+        let until = now();
+        let since = until - Duration::hours(26);
         TestDb::add_measurements(&store, 1000, since, until).unwrap();
         TestDb::add_observations(&store, 1000, since, until).unwrap();
 
