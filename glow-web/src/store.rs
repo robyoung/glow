@@ -1,9 +1,11 @@
-use core::cmp::Ordering;
-use std::convert::TryFrom;
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+};
 
 use actix_web::FromRequest;
 use chrono::{DateTime, Duration, DurationRound, Utc};
-use eyre::{eyre, Result, WrapErr};
+use eyre::{Result, WrapErr};
 use fallible_iterator::FallibleIterator;
 use futures::future::{err, ok, Ready};
 use itertools::Itertools;
@@ -20,7 +22,6 @@ use glow_events::{
     v2::{Command, Event, Message, Payload},
     Measurement,
 };
-use log::debug;
 
 pub trait StorePool: std::marker::Unpin + Clone {
     type Store: Store;
@@ -66,9 +67,9 @@ pub trait Store {
             .into_iter()
             .map(|(hour, group)| {
                 let event = group.last().unwrap();
-                Message::raw(hour, event.payload().to_owned())
+                (hour, Message::raw(hour, event.payload().to_owned()))
             })
-            .collect::<Vec<Message>>();
+            .collect::<HashMap<DateTime<Utc>, Message>>();
 
         let mut observations = self
             .get_observations_since(stamp)
@@ -79,51 +80,33 @@ pub trait Store {
             .map(|(hour, group)| {
                 let mut obs = group.last().unwrap().clone();
                 obs.date_time = hour;
-                obs
+                (hour, obs)
             })
-            .collect::<Vec<crate::weather::Observation>>();
+            .collect::<HashMap<DateTime<Utc>, crate::weather::Observation>>();
 
-        // line up the two sets of observations
-        loop {
-            if observations.is_empty() || measurements.is_empty() {
-                break;
-            }
-            match observations[0].date_time.cmp(&measurements[0].stamp()) {
-                Ordering::Less => {
-                    let measurement = measurements.remove(0);
-                    debug!("ordering more: {:?}", measurement);
-                }
-                Ordering::Greater => {
-                    let observation = observations.remove(0);
-                    debug!("ordering less: {:?}", observation);
-                }
-                Ordering::Equal => {
-                    break;
-                }
-            }
-        }
+        let mut hours = measurements
+            .keys()
+            .cloned()
+            .collect::<HashSet<DateTime<Utc>>>()
+            .union(
+                &observations
+                    .keys()
+                    .cloned()
+                    .collect::<HashSet<DateTime<Utc>>>(),
+            )
+            .cloned()
+            .collect::<Vec<DateTime<Utc>>>();
 
-        #[allow(clippy::filter_map)] // keeping them separate makes it clearer in this case
-        let climate = measurements
-            .into_iter()
-            .merge_join_by(observations.into_iter(), |measurement, observation| {
-                measurement.stamp().cmp(&observation.date_time)
-            })
-            .filter_map(|either| match either {
-                itertools::EitherOrBoth::Both(measurement, observation) => {
-                    Some((measurement, observation))
-                }
-                _ => None,
-            })
-            .map(|(measurement, observation)| -> Result<ClimateObservation> {
-                if measurement.stamp() == observation.date_time {
-                    Ok(ClimateObservation::try_from_parts(
-                        measurement,
-                        observation,
-                    )?)
-                } else {
-                    Err(eyre!("missing either observations or measurements"))
-                }
+        hours.sort_unstable();
+        hours.reverse();
+
+        let climate = hours
+            .iter()
+            .map(|hour| {
+                Ok(ClimateObservation::try_from_parts(
+                    measurements.remove(hour),
+                    observations.remove(hour),
+                )?)
             })
             .collect::<Result<Vec<ClimateObservation>>>()?;
 
@@ -687,7 +670,7 @@ mod tests {
             .unwrap();
 
         // assert
-        assert_eq!(climate_history.len(), 19);
+        assert_eq!(climate_history.len(), 25);
     }
 
     #[test]
@@ -717,6 +700,9 @@ mod tests {
             .unwrap();
 
         // assert
-        assert_eq!(climate_history.len(), 0);
+        println!("{:?}", climate_history);
+        assert_eq!(climate_history.len(), 15);
+        assert!(climate_history[0].outdoor.is_some());
+        assert!(climate_history[0].indoor.is_none());
     }
 }

@@ -56,11 +56,21 @@ pub struct ClimateObservation {
 }
 
 impl ClimateObservation {
-    pub fn try_from_parts(message: Message, observation: Observation) -> Result<Self> {
-        let date_time = message.stamp();
+    pub fn try_from_parts(
+        message: Option<Message>,
+        observation: Option<Observation>,
+    ) -> Result<Self> {
+        // TODO: can this be tidied up?
+        let date_time = if message.is_some() {
+            message.clone().unwrap().stamp()
+        } else if observation.is_some() {
+            observation.clone().unwrap().date_time
+        } else {
+            return Err(eyre!("need at least measurement or observation to be Some"));
+        };
         Ok(Self {
-            indoor: Some(ClimateMeasurement::try_from(message)?),
-            outdoor: Some(ClimateMeasurement::from(observation)),
+            indoor: message.map(ClimateMeasurement::try_from).transpose()?,
+            outdoor: observation.map(ClimateMeasurement::from),
             date_time,
         })
     }
