@@ -65,3 +65,16 @@ impl ClimateObservation {
         })
     }
 }
+
+impl TryFrom<Message> for ClimateObservation {
+    type Error = eyre::Error;
+
+    fn try_from(message: Message) -> Result<Self, Self::Error> {
+        let date_time = message.stamp();
+        Ok(Self {
+            indoor: Some(ClimateMeasurement::try_from(message)?),
+            outdoor: None,
+            date_time,
+        })
+    }
+}

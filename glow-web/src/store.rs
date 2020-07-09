@@ -1,4 +1,5 @@
 use core::cmp::Ordering;
+use std::convert::TryFrom;
 
 use actix_web::FromRequest;
 use chrono::{DateTime, Duration, DurationRound, Utc};
@@ -46,7 +47,7 @@ pub trait Store {
     fn get_latest_event_like(&self, like: &str) -> Result<Option<Message>>;
 
     fn add_measurement(&self, stamp: DateTime<Utc>, measurement: &Measurement) -> Result<()>;
-    fn get_latest_measurement(&self) -> Option<Message>;
+    fn get_latest_measurement(&self) -> Option<ClimateObservation>;
     fn get_measurements_since(&self, stamp: Duration) -> Result<Vec<Message>>;
 
     fn queue_command(&self, command: Command) -> Result<()>;
@@ -340,14 +341,14 @@ impl Store for SQLiteStore {
 
     // the point of this method is to swallow the error
     #[allow(clippy::match_wildcard_for_single_variants)]
-    fn get_latest_measurement(&self) -> Option<Message> {
+    fn get_latest_measurement(&self) -> Option<ClimateObservation> {
         let result = self.conn.query_row(
             "SELECT stamp, temperature, humidity FROM environment_measurements ORDER BY stamp DESC LIMIT 1",
             NO_PARAMS,
             parse_measurement_row,
         );
         match result {
-            Ok(event) => Some(event),
+            Ok(event) => ClimateObservation::try_from(event).ok(),
             _ => None,
         }
     }

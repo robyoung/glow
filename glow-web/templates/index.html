@@ -16,12 +16,12 @@
 {% endif %}
 <div class="row">
 
-  {% if measurement %}
+  {% if observation %}
   <div class="col s12 m6 l3">
     <div class="card blue-grey darken-4 measurement">
       <div class="card-content white-text center-align">
-        <span class="card-title headline-figure">{{ measurement.temperature }}&deg;C</span>
-        <p>collected {{ measurement.age }} ago</p>
+        <span class="card-title headline-figure">{{ observation.indoor.temperature }}&deg;C</span>
+        <p>collected {{ observation.age }} ago</p>
         <p>Nursery</p>
       </div>
     </div>

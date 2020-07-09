@@ -1,5 +1,3 @@
-use std::convert::TryFrom;
-
 use chrono::{Duration, Utc};
 use eyre::{Result, WrapErr};
 use itertools::Itertools;
@@ -8,7 +6,7 @@ use glow_events::v2::{Command, Event, Message, Payload};
 
 use crate::session::Session;
 use crate::store::Store;
-use crate::view::data::{ClimateObservation, EventSummary, Measurement};
+use crate::view::data::{ClimateObservation, EventSummary};
 use crate::view::View;
 
 pub(crate) fn index(
@@ -18,10 +16,8 @@ pub(crate) fn index(
 ) -> Result<String> {
     view.insert("flash", &session.pop::<Option<String>>("flash")?);
 
-    if let Some(message) = store.get_latest_measurement() {
-        if let Ok(measurement) = Measurement::try_from(message) {
-            view.insert("measurement", &measurement);
-        }
+    if let Some(observation) = store.get_latest_measurement() {
+        view.insert("observation", &ClimateObservation::from(observation));
     }
 
     view.insert(

@@ -2,11 +2,9 @@
 //!
 //! These data types are fully formatted and ready to be displayed in a UI.
 //! They often have a corollary in the `data` module.
-use core::convert::TryFrom;
 use std::collections::HashMap;
 
 use chrono::Utc;
-use eyre::{eyre, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -14,33 +12,6 @@ use glow_events::v2::{Event, Message, Payload};
 
 use crate::data;
 use crate::formatting::format_time_since;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Measurement {
-    pub temperature: String,
-    pub humidity: String,
-    pub age: String,
-    pub date: String,
-    pub time: String,
-}
-
-impl TryFrom<Message> for Measurement {
-    type Error = eyre::Error;
-
-    fn try_from(message: Message) -> Result<Self, Self::Error> {
-        if let Payload::Event(Event::Measurement(measurement)) = message.payload() {
-            Ok(Measurement {
-                temperature: format!("{:.2}", measurement.temperature),
-                humidity: format!("{:.2}", measurement.humidity),
-                age: format_time_since(Utc::now(), message.stamp()),
-                date: message.stamp().format("%Y-%m-%d").to_string(),
-                time: message.stamp().format("%H:%M:%S").to_string(),
-            })
-        } else {
-            Err(eyre!("not a measurement"))
-        }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClimateMeasurement {
@@ -61,6 +32,7 @@ impl From<data::ClimateMeasurement> for ClimateMeasurement {
 pub struct ClimateObservation {
     pub indoor: Option<ClimateMeasurement>,
     pub outdoor: Option<ClimateMeasurement>,
+    pub age: String,
     pub date: String,
     pub time: String,
 }
@@ -69,9 +41,11 @@ impl From<data::ClimateObservation> for ClimateObservation {
     fn from(observation: data::ClimateObservation) -> Self {
         let date = observation.date_time.format("%Y-%m-%d").to_string();
         let time = observation.date_time.format("%H:%M").to_string();
+        let age = format_time_since(Utc::now(), observation.date_time);
         Self {
             indoor: observation.indoor.map(ClimateMeasurement::from),
             outdoor: observation.outdoor.map(ClimateMeasurement::from),
+            age,
             date,
             time,
         }
