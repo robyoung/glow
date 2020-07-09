@@ -48,10 +48,10 @@
       {% for observation in date[1] %}
       <tr>
         <td>{{ observation.time }}</td>
-        <td>{{ observation.indoor.temperature }}</td>
-        <td>{{ observation.outdoor.temperature }}</td>
-        <td>{{ observation.indoor.humidity }}</td>
-        <td>{{ observation.outdoor.humidity }}</td>
+        <td>{% if observation.indoor %}{{ observation.indoor.temperature }}{% endif %}</td>
+        <td>{% if observation.outdoor %}{{ observation.outdoor.temperature }}{% endif %}</td>
+        <td>{% if observation.indoor %}{{ observation.indoor.humidity }}{% endif %}</td>
+        <td>{% if observation.outdoor %}{{ observation.outdoor.humidity }}{% endif %}</td>
       </tr>
       {% endfor %}
       {% endfor %}
