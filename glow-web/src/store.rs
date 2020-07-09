@@ -1,14 +1,23 @@
+use std::{
+    collections::{HashMap, HashSet},
+    convert::TryFrom,
+};
+
 use actix_web::FromRequest;
-use chrono::{offset::Utc, DateTime, Duration};
-use eyre::Result;
+use chrono::{DateTime, Duration, DurationRound, Utc};
+use eyre::{Result, WrapErr};
 use fallible_iterator::FallibleIterator;
 use futures::future::{err, ok, Ready};
+use itertools::Itertools;
 use r2d2::{Pool, PooledConnection};
 use r2d2_sqlite::{self, SqliteConnectionManager};
 use rand::Rng;
 use rusqlite::{types::FromSqlError, Row, NO_PARAMS};
 
-use crate::weather::{Forecast, Observation};
+use crate::{
+    data::ClimateObservation,
+    weather::{Forecast, Observation},
+};
 use glow_events::{
     v2::{Command, Event, Message, Payload},
     Measurement,
@@ -39,7 +48,7 @@ pub trait Store {
     fn get_latest_event_like(&self, like: &str) -> Result<Option<Message>>;
 
     fn add_measurement(&self, stamp: DateTime<Utc>, measurement: &Measurement) -> Result<()>;
-    fn get_latest_measurement(&self) -> Option<Message>;
+    fn get_latest_measurement(&self) -> Option<ClimateObservation>;
     fn get_measurements_since(&self, stamp: Duration) -> Result<Vec<Message>>;
 
     fn queue_command(&self, command: Command) -> Result<()>;
@@ -47,6 +56,62 @@ pub trait Store {
 
     fn add_observation(&self, observation: &Observation) -> Result<()>;
     fn add_forecast(&self, forecast: &Forecast) -> Result<()>;
+    fn get_observations_since(&self, stamp: Duration) -> Result<Vec<Observation>>;
+
+    fn get_climate_history_since(&self, stamp: Duration) -> Result<Vec<ClimateObservation>> {
+        let mut measurements = self
+            .get_measurements_since(stamp)
+            .wrap_err("failed getting measurements")?
+            .iter()
+            .group_by(|event| event.stamp().duration_trunc(Duration::hours(1)).unwrap())
+            .into_iter()
+            .map(|(hour, group)| {
+                let event = group.last().unwrap();
+                (hour, Message::raw(hour, event.payload().to_owned()))
+            })
+            .collect::<HashMap<DateTime<Utc>, Message>>();
+
+        let mut observations = self
+            .get_observations_since(stamp)
+            .wrap_err("failed getting weather observations")?
+            .iter()
+            .group_by(|obs| obs.date_time.duration_trunc(Duration::hours(1)).unwrap())
+            .into_iter()
+            .map(|(hour, group)| {
+                let mut obs = group.last().unwrap().clone();
+                obs.date_time = hour;
+                (hour, obs)
+            })
+            .collect::<HashMap<DateTime<Utc>, crate::weather::Observation>>();
+
+        let mut hours = measurements
+            .keys()
+            .cloned()
+            .collect::<HashSet<DateTime<Utc>>>()
+            .union(
+                &observations
+                    .keys()
+                    .cloned()
+                    .collect::<HashSet<DateTime<Utc>>>(),
+            )
+            .cloned()
+            .collect::<Vec<DateTime<Utc>>>();
+
+        hours.sort_unstable();
+        hours.reverse();
+
+        let climate = hours
+            .iter()
+            .map(|hour| {
+                Ok(ClimateObservation::try_from_parts(
+                    measurements.remove(hour),
+                    observations.remove(hour),
+                )?)
+            })
+            .collect::<Result<Vec<ClimateObservation>>>()?;
+
+        Ok(climate)
+    }
 }
 
 #[derive(Clone)]
@@ -259,14 +324,14 @@ impl Store for SQLiteStore {
 
     // the point of this method is to swallow the error
     #[allow(clippy::match_wildcard_for_single_variants)]
-    fn get_latest_measurement(&self) -> Option<Message> {
+    fn get_latest_measurement(&self) -> Option<ClimateObservation> {
         let result = self.conn.query_row(
             "SELECT stamp, temperature, humidity FROM environment_measurements ORDER BY stamp DESC LIMIT 1",
             NO_PARAMS,
             parse_measurement_row,
         );
         match result {
-            Ok(event) => Some(event),
+            Ok(event) => ClimateObservation::try_from(event).ok(),
             _ => None,
         }
     }
@@ -331,6 +396,28 @@ impl Store for SQLiteStore {
             )
             .map(|_| ())?)
     }
+
+    fn get_observations_since(&self, since: Duration) -> Result<Vec<Observation>> {
+        let now = self.now;
+        Ok(self
+            .conn
+            .prepare(
+                r#"
+                SELECT payload
+                FROM weather
+                WHERE type='observation' AND date_time >= ? ORDER BY date_time DESC
+            "#,
+            )?
+            .query(params![now().checked_sub_signed(since).unwrap()])?
+            .map(parse_observation_row)
+            .collect::<Vec<Observation>>()?)
+    }
+}
+
+fn parse_observation_row(row: &Row<'_>) -> rusqlite::Result<Observation> {
+    let data: String = row.get(0)?;
+    serde_json::from_str(&data)
+        .map_err(|err| -> rusqlite::Error { FromSqlError::Other(Box::new(err)).into() })
 }
 
 fn parse_message_row(row: &Row<'_>) -> rusqlite::Result<Message> {
@@ -373,7 +460,12 @@ pub mod test {
     use rand::prelude::*;
 
     use super::{SQLiteStorePool, Store, StorePool};
+    use crate::weather::{Observation, WindDirection};
     use glow_events::Measurement;
+
+    pub fn now() -> DateTime<Utc> {
+        "2012-12-12T12:12:00Z".parse::<DateTime<Utc>>().unwrap()
+    }
 
     pub struct TestDb {
         pool: SQLiteStorePool,
@@ -398,6 +490,31 @@ pub mod test {
             self.pool().get()
         }
 
+        pub fn add_observations(
+            store: &impl Store,
+            num: u32,
+            from: DateTime<Utc>,
+            until: DateTime<Utc>,
+        ) -> Result<()> {
+            let mut rng = rand::thread_rng();
+
+            let duration = (until - from).num_seconds();
+            let step = duration / num as i64;
+
+            for i in 0..num {
+                store.add_observation(&Observation {
+                    temperature: rng.gen_range(5, 25),
+                    humidity: rng.gen_range(30, 70),
+                    wind_speed: rng.gen_range(0, 15),
+                    wind_direction: WindDirection::NorthNorthWesterly,
+                    date_time: from + Duration::seconds(i as i64 * step),
+                    point: (12.1, 12.2),
+                    url: "https://example.org".to_string(),
+                })?;
+            }
+            Ok(())
+        }
+
         pub fn add_measurements(
             store: &impl Store,
             num: u32,
@@ -407,10 +524,11 @@ pub mod test {
             let mut rng = rand::thread_rng();
 
             let duration = (until - from).num_seconds();
+            let step = duration / num as i64;
 
-            for _ in 0..num {
+            for i in 0..num {
                 store.add_measurement(
-                    from + Duration::seconds(rng.gen_range(0, duration)),
+                    from + Duration::seconds(i as i64 * step),
                     &Measurement::new(rng.gen_range(5.0, 25.0), rng.gen_range(30.0, 70.0)),
                 )?;
             }
@@ -428,16 +546,13 @@ pub mod test {
 
 #[cfg(test)]
 mod tests {
+    use super::test::{now, TestDb};
     use super::*;
-
-    fn then() -> DateTime<Utc> {
-        "2012-12-12T12:00:00Z".parse::<DateTime<Utc>>().unwrap()
-    }
 
     #[test]
     fn dequeue_events_removes_events() {
         // arrange
-        let db = test::TestDb::with_now(then);
+        let db = TestDb::with_now(now);
         let store = db.store().unwrap();
 
         // act
@@ -455,7 +570,7 @@ mod tests {
     #[test]
     fn test_get_measurements_since() {
         // arrange
-        let db = test::TestDb::with_now(then);
+        let db = TestDb::with_now(now);
         let store = db.store().unwrap();
 
         vec![
@@ -463,8 +578,8 @@ mod tests {
             ("2012-12-12T11:10:00Z", 11.0),
             ("2012-12-12T11:20:00Z", 12.0),
             ("2012-12-12T11:30:00Z", 13.0),
-            ("2012-12-12T11:40:00Z", 14.0),
-            ("2012-12-12T11:50:00Z", 15.0),
+            ("2012-12-12T11:50:00Z", 14.0),
+            ("2012-12-12T11:55:00Z", 15.0),
         ]
         .iter()
         .for_each(|&(stamp, temp)| {
@@ -480,13 +595,12 @@ mod tests {
         let measurements = store.get_measurements_since(Duration::minutes(30)).unwrap();
 
         // assert
-        assert_eq!(measurements.len(), 3);
+        assert_eq!(measurements.len(), 2);
         assert_eq!(
             measurements,
             vec![
-                ("2012-12-12T11:50:00Z", 15.0),
-                ("2012-12-12T11:40:00Z", 14.0),
-                ("2012-12-12T11:30:00Z", 13.0),
+                ("2012-12-12T11:55:00Z", 15.0),
+                ("2012-12-12T11:50:00Z", 14.0),
             ]
             .iter()
             .map(|(stamp, temp)| {
@@ -497,5 +611,98 @@ mod tests {
             })
             .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn get_observations_since() {
+        // arrange
+        let db = TestDb::with_now(now);
+        let store = db.store().unwrap();
+        let until = now();
+        let since = until - Duration::hours(4);
+        TestDb::add_observations(&store, 100, since, until).unwrap();
+
+        // act
+        let observations = store.get_observations_since(Duration::minutes(61)).unwrap();
+
+        // assert
+        assert_eq!(observations.len(), 25);
+    }
+
+    #[test]
+    fn get_climate_since() {
+        // arrange
+        let db = TestDb::with_now(now);
+        let store = db.store().unwrap();
+        let until = now();
+        let since = until - Duration::hours(26);
+        TestDb::add_measurements(&store, 1000, since, until).unwrap();
+        TestDb::add_observations(&store, 1000, since, until).unwrap();
+
+        // act
+        let climate_history = store
+            .get_climate_history_since(Duration::hours(24))
+            .unwrap();
+
+        // assert
+        assert_eq!(climate_history.len(), 25);
+    }
+
+    #[test]
+    fn get_climate_since_missing_measurements() {
+        // arrange
+        let db = TestDb::with_now(now);
+        let store = db.store().unwrap();
+        let until = now();
+        let since = until - Duration::hours(26);
+        TestDb::add_measurements(&store, 1000, since, until).unwrap();
+        TestDb::add_observations(
+            &store,
+            100,
+            until - Duration::hours(20),
+            until - Duration::hours(2),
+        )
+        .unwrap();
+
+        // act
+        let climate_history = store
+            .get_climate_history_since(Duration::hours(24))
+            .unwrap();
+
+        // assert
+        assert_eq!(climate_history.len(), 25);
+    }
+
+    #[test]
+    fn get_climate_since_disjointed_lists() {
+        // arrange
+        let db = TestDb::with_now(now);
+        let store = db.store().unwrap();
+        let until = now();
+        TestDb::add_measurements(
+            &store,
+            100,
+            until - Duration::hours(20),
+            until - Duration::hours(15),
+        )
+        .unwrap();
+        TestDb::add_observations(
+            &store,
+            100,
+            until - Duration::hours(10),
+            until - Duration::hours(2),
+        )
+        .unwrap();
+
+        // act
+        let climate_history = store
+            .get_climate_history_since(Duration::hours(24))
+            .unwrap();
+
+        // assert
+        println!("{:?}", climate_history);
+        assert_eq!(climate_history.len(), 15);
+        assert!(climate_history[0].outdoor.is_some());
+        assert!(climate_history[0].indoor.is_none());
     }
 }

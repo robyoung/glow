@@ -5,9 +5,9 @@ use glow_events::v2::Message;
 
 use crate::{
     controllers,
-    data::{Login, SetBrightness},
     session::ActixSession,
     store,
+    view::data::{Login, SetBrightness},
     view::{TeraView, View},
     AppData,
 };

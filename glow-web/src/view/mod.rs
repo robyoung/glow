@@ -4,6 +4,8 @@ use eyre::Result;
 use futures::future::{err, ok, Ready};
 use serde::Serialize;
 
+pub mod data;
+
 pub(crate) trait View {
     fn insert<T: Serialize + ?Sized, S: Into<String>>(&mut self, key: S, val: &T);
     fn render(&self, template: &str) -> Result<String>;

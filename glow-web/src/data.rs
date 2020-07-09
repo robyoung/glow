@@ -1,13 +1,17 @@
-use std::{collections::HashMap, convert::TryFrom};
+//! Data types for use between modules
+//!
+//! These data types are useful to multiple modules, either because they are
+//! core data types (like `AppData`) or because they generalise more specific
+//! data types (like `ClimateObservation` and `ClimateMeasurement`).
+use core::convert::TryFrom;
 
-use chrono::Utc;
 use eyre::{eyre, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 
 use glow_events::v2::{Event, Message, Payload};
 
-use crate::formatting::format_time_since;
+use crate::weather::Observation;
+use chrono::{DateTime, Utc};
 
 pub struct AppData {
     pub token: String,
@@ -15,25 +19,28 @@ pub struct AppData {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Measurement {
-    pub temperature: String,
-    pub humidity: String,
-    pub age: String,
-    pub date: String,
-    pub time: String,
+pub struct ClimateMeasurement {
+    pub temperature: f64,
+    pub humidity: f64,
 }
 
-impl TryFrom<Message> for Measurement {
+impl From<Observation> for ClimateMeasurement {
+    fn from(observation: Observation) -> Self {
+        ClimateMeasurement {
+            temperature: f64::from(observation.temperature),
+            humidity: f64::from(observation.humidity),
+        }
+    }
+}
+
+impl TryFrom<Message> for ClimateMeasurement {
     type Error = eyre::Error;
 
     fn try_from(message: Message) -> Result<Self, Self::Error> {
         if let Payload::Event(Event::Measurement(measurement)) = message.payload() {
-            Ok(Measurement {
-                temperature: format!("{:.2}", measurement.temperature),
-                humidity: format!("{:.2}", measurement.humidity),
-                age: format_time_since(Utc::now(), message.stamp()),
-                date: message.stamp().format("%Y-%m-%d").to_string(),
-                time: message.stamp().format("%H:%M:%S").to_string(),
+            Ok(ClimateMeasurement {
+                temperature: measurement.temperature as f64,
+                humidity: measurement.humidity as f64,
             })
         } else {
             Err(eyre!("not a measurement"))
@@ -41,213 +48,43 @@ impl TryFrom<Message> for Measurement {
     }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub(crate) struct EventSummary {
-    pub icon: String,
-    pub icon_colour: String,
-    pub stamp: String,
-    pub date: String,
-    pub time: String,
-    pub title: String,
-    pub detail: String,
-    pub event_type: String,
-    pub extra: HashMap<String, Value>,
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ClimateObservation {
+    pub indoor: Option<ClimateMeasurement>,
+    pub outdoor: Option<ClimateMeasurement>,
+    pub date_time: DateTime<Utc>,
 }
 
-impl From<Message> for EventSummary {
-    fn from(message: Message) -> Self {
-        EventSummary::from(&message)
+impl ClimateObservation {
+    pub fn try_from_parts(
+        message: Option<Message>,
+        observation: Option<Observation>,
+    ) -> Result<Self> {
+        // TODO: can this be tidied up?
+        let date_time = if message.is_some() {
+            message.clone().unwrap().stamp()
+        } else if observation.is_some() {
+            observation.clone().unwrap().date_time
+        } else {
+            return Err(eyre!("need at least measurement or observation to be Some"));
+        };
+        Ok(Self {
+            indoor: message.map(ClimateMeasurement::try_from).transpose()?,
+            outdoor: observation.map(ClimateMeasurement::from),
+            date_time,
+        })
     }
 }
 
-impl From<&Message> for EventSummary {
-    fn from(message: &Message) -> Self {
-        let mut summary = EventSummary::default();
+impl TryFrom<Message> for ClimateObservation {
+    type Error = eyre::Error;
 
-        if let Payload::Event(event) = message.payload() {
-            summary.stamp = message.stamp().format("%F %T").to_string();
-            summary.date = message.stamp().format("%Y-%m-%d").to_string();
-            summary.time = message.stamp().format("%H:%M:%S").to_string();
-            summary.title = event.title().to_string();
-            summary.icon = get_event_icon(event).to_string();
-            summary.icon_colour = get_event_icon_colour(event).to_string();
-            summary.detail = format!("{}", event);
-            summary.event_type = event.event_type().to_string();
-            summary.extra = get_event_extra(event);
-        }
-        summary
-    }
-}
-
-fn get_event_icon(event: &Event) -> &'static str {
-    match event {
-        Event::Measurement(_) | Event::MeasurementFailure => "eco",
-        Event::SingleTap => "touch_app",
-        Event::Devices(_) | Event::HeaterStarted | Event::HeaterStopped => "settings_remote",
-        Event::LEDBrightness(_) | Event::LEDColours(_) => "brightness_4",
-        Event::Started => "started",
-    }
-}
-
-fn get_event_icon_colour(event: &Event) -> &'static str {
-    match event {
-        Event::Measurement(_) | Event::MeasurementFailure => "green",
-        Event::SingleTap => "teal",
-        Event::Devices(_) | Event::HeaterStarted | Event::HeaterStopped => "amber",
-        Event::LEDBrightness(_) | Event::LEDColours(_) => "light-blue",
-        Event::Started => "red",
-    }
-}
-
-fn get_event_extra(event: &Event) -> HashMap<String, Value> {
-    let mut extra = HashMap::new();
-    match event {
-        Event::LEDColours(colours) => {
-            let colours = colours
-                .iter()
-                .map(|c| format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2))
-                .collect::<Vec<String>>();
-
-            extra.insert("colours".into(), colours.into());
-        }
-        Event::Devices(devices) => {
-            let devices = devices
-                .iter()
-                .map(|d| json!({"name": d.name }))
-                .collect::<Vec<Value>>();
-
-            extra.insert("devices".into(), devices.into());
-        }
-        _ => {}
-    }
-    extra
-}
-
-#[derive(Deserialize)]
-pub struct SetBrightness {
-    pub brightness: u32,
-}
-
-#[derive(Deserialize)]
-pub struct Login {
-    pub password: String,
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use serde_json::{json, value::Value};
-
-    use glow_events::{
-        v2::{Command, Event, Message, Payload},
-        Measurement, TPLinkDevice,
-    };
-
-    use super::EventSummary;
-
-    #[test]
-    fn event_summary() {
-        struct EventSummaryTest {
-            message: Message,
-            detail: &'static str,
-            icon: &'static str,
-            icon_colour: &'static str,
-            extra: HashMap<String, Value>,
-        }
-        impl EventSummaryTest {
-            fn new(
-                message: Message,
-                detail: &'static str,
-                icon: &'static str,
-                icon_colour: &'static str,
-                extra: HashMap<String, Value>,
-            ) -> Self {
-                Self {
-                    message,
-                    detail,
-                    icon,
-                    icon_colour,
-                    extra,
-                }
-            }
-        }
-        let messages = vec![
-            EventSummaryTest::new(
-                Message::new(Payload::Event(Event::Measurement(Measurement::new(
-                    1.1, 2.2,
-                )))),
-                "temperature: 1.10°C humidity: 2.20%",
-                "eco",
-                "green",
-                HashMap::new(),
-            ),
-            EventSummaryTest::new(
-                Message::new(Payload::Event(Event::SingleTap)),
-                "single tap",
-                "touch_app",
-                "teal",
-                HashMap::new(),
-            ),
-            EventSummaryTest::new(
-                Message::new(Payload::Event(Event::Started)),
-                "started",
-                "started",
-                "red",
-                HashMap::new(),
-            ),
-            EventSummaryTest::new(
-                Message::new(Payload::Event(Event::LEDColours(vec![
-                    (123, 123, 123),
-                    (123, 123, 123),
-                    (123, 123, 123),
-                ]))),
-                "colours updated",
-                "brightness_4",
-                "light-blue",
-                [(
-                    String::from("colours"),
-                    json!([
-                        "#7B7B7B".to_string(),
-                        "#7B7B7B".to_string(),
-                        "#7B7B7B".to_string()
-                    ]),
-                )]
-                .iter()
-                .cloned()
-                .collect(),
-            ),
-            EventSummaryTest::new(
-                Message::new(Payload::Event(Event::Devices(vec![TPLinkDevice {
-                    name: "plug".to_string(),
-                }]))),
-                "device list",
-                "settings_remote",
-                "amber",
-                [(
-                    "devices".to_string(),
-                    json!([{"name": "plug".to_string()}]),
-                )]
-                .iter()
-                .cloned()
-                .collect(),
-            ),
-            EventSummaryTest::new(
-                Message::new(Payload::Command(Command::Stop)),
-                "",
-                "",
-                "",
-                HashMap::new(),
-            ),
-        ];
-
-        for message in messages {
-            let summary = EventSummary::from(message.message);
-
-            assert_eq!(summary.detail, message.detail);
-            assert_eq!(summary.icon, message.icon);
-            assert_eq!(summary.icon_colour, message.icon_colour);
-            assert_eq!(summary.extra, message.extra);
-        }
+    fn try_from(message: Message) -> Result<Self, Self::Error> {
+        let date_time = message.stamp();
+        Ok(Self {
+            indoor: Some(ClimateMeasurement::try_from(message)?),
+            outdoor: None,
+            date_time,
+        })
     }
 }
