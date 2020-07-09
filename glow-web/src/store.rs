@@ -84,12 +84,17 @@ pub trait Store {
 
         // line up the two sets of observations
         loop {
+            if observations.is_empty() || measurements.is_empty() {
+                break;
+            }
             match observations[0].date_time.cmp(&measurements[0].stamp()) {
                 Ordering::Less => {
-                    debug!("ordering less: {:?}", observations.remove(0));
+                    let measurement = measurements.remove(0);
+                    debug!("ordering more: {:?}", measurement);
                 }
                 Ordering::Greater => {
-                    debug!("ordering more: {:?}", measurements.remove(0));
+                    let observation = observations.remove(0);
+                    debug!("ordering less: {:?}", observation);
                 }
                 Ordering::Equal => {
                     break;
@@ -657,5 +662,60 @@ mod tests {
 
         // assert
         assert_eq!(climate_history.len(), 25);
+    }
+
+    #[test]
+    fn get_climate_since_missing_measurements() {
+        // arrange
+        let db = TestDb::with_now(now);
+        let store = db.store().unwrap();
+        let until = now();
+        let since = until - Duration::hours(26);
+        TestDb::add_measurements(&store, 1000, since, until).unwrap();
+        TestDb::add_observations(
+            &store,
+            100,
+            until - Duration::hours(20),
+            until - Duration::hours(2),
+        )
+        .unwrap();
+
+        // act
+        let climate_history = store
+            .get_climate_history_since(Duration::hours(24))
+            .unwrap();
+
+        // assert
+        assert_eq!(climate_history.len(), 19);
+    }
+
+    #[test]
+    fn get_climate_since_disjointed_lists() {
+        // arrange
+        let db = TestDb::with_now(now);
+        let store = db.store().unwrap();
+        let until = now();
+        TestDb::add_measurements(
+            &store,
+            100,
+            until - Duration::hours(20),
+            until - Duration::hours(15),
+        )
+        .unwrap();
+        TestDb::add_observations(
+            &store,
+            100,
+            until - Duration::hours(10),
+            until - Duration::hours(2),
+        )
+        .unwrap();
+
+        // act
+        let climate_history = store
+            .get_climate_history_since(Duration::hours(24))
+            .unwrap();
+
+        // assert
+        assert_eq!(climate_history.len(), 0);
     }
 }
