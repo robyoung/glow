@@ -2,6 +2,8 @@
 
 [![GitHub Actions][gh-image]][gh-checks]
 
+example
+
 [gh-image]: https://github.com/robyoung/glow/workflows/CI/badge.svg
 [gh-checks]: https://github.com/robyoung/glow/actions?query=workflow%3ACI
 
