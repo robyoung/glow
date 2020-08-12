@@ -26,11 +26,6 @@ impl Measurement {
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
-pub struct TPLinkDevice {
-    pub name: String,
-}
-
 impl From<am2320::Measurement> for Measurement {
     fn from(m: am2320::Measurement) -> Self {
         let temperature = m.temperature as f64;
@@ -40,4 +35,9 @@ impl From<am2320::Measurement> for Measurement {
             (humidity * 100.0).round() / 100.0,
         )
     }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
+pub struct TPLinkDevice {
+    pub name: String,
 }

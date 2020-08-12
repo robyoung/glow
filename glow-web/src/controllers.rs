@@ -68,14 +68,12 @@ pub(crate) fn run_heater(store: &impl Store, session: &mut impl Session) -> Resu
         .get_latest_event_like(&r#"{"TPLink":"RunHeater"}"#)
         .wrap_err("failed to get latest heater event")?;
 
-    let can_run_heater = if let Some(latest_event) = latest_event {
+    let can_run_heater = latest_event.map_or(true, |latest_event| {
         Utc::now()
             .signed_duration_since(latest_event.stamp())
             .num_minutes()
             > 2
-    } else {
-        true
-    };
+    });
 
     if can_run_heater {
         store

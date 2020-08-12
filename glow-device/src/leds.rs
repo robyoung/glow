@@ -1,6 +1,11 @@
-use std::{cmp::Ordering, f32, fmt, thread, time};
+use std::{cmp::Ordering, convert::TryInto, f32, fmt, sync::mpsc::sync_channel, thread};
 
 use blinkt::Blinkt;
+use glow_events::v2::Message;
+use log::{debug, error};
+use tokio::time::{delay_for, Duration};
+
+use crate::events::Sender;
 
 const NUM_PIXELS: usize = 8;
 
@@ -9,6 +14,83 @@ pub const COLOUR_ORANGE: Colour = Colour(120, 20, 0);
 pub const COLOUR_SALMON: Colour = Colour(160, 10, 1);
 pub const COLOUR_CORAL: Colour = Colour(255, 1, 1);
 pub const COLOUR_RED: Colour = Colour(255, 0, 100);
+
+pub async fn handler(tx: Sender) {
+    let colour_range = ColourRange::new(
+        14.0,
+        4.0,
+        &[
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+            COLOUR_SALMON,
+            COLOUR_CORAL,
+            COLOUR_RED,
+        ],
+    )
+    .unwrap();
+    let mut colours = colour_range.all(Colour::black());
+    let mut brightness = Brightness::default().value();
+    let mut leds = BlinktBackgroundLEDs::new();
+    let mut rx = tx.subscribe();
+
+    use glow_events::v2::{Command::*, Event::*, Payload::*};
+    while let Ok(message) = rx.recv().await {
+        match message.payload() {
+            Event(Measurement(measurement)) => {
+                let new_colours = colour_range.get_pixels(measurement.temperature as f32);
+                if new_colours.iter().zip(&colours).any(|(&a, &b)| a != b) {
+                    colours = new_colours;
+                    tx.send(Message::new_command(UpdateLEDs))
+                        .expect("Failed to write TPLink device list to channel");
+                } else {
+                    debug!("Not updating unchanged LEDs");
+                }
+            }
+            Event(SingleTap) => {
+                brightness = Brightness::next_from(brightness).value();
+                tx.send(Message::new_command(RunParty)).unwrap();
+                tx.send(Message::new_command(UpdateLEDs)).unwrap();
+            }
+            Command(RunParty) => {
+                // Have a party!
+                //
+                // Play a short flashing sequence on the LEDs
+                // TODO: move this to a function?
+                let colours = [Colour::red(), Colour::green(), Colour::blue()];
+                let mut current_colours = [Colour::black(); NUM_PIXELS as usize];
+
+                for colour in colours.iter() {
+                    for i in 0..NUM_PIXELS {
+                        current_colours[i as usize] = *colour;
+                        leds.show(&current_colours, Brightness::Bright.value())
+                            .await
+                            .unwrap_or_else(|err| {
+                                error!("party error: {}", err);
+                            });
+                        delay_for(Duration::from_millis(50)).await;
+                    }
+                }
+            }
+            Command(UpdateLEDs) => {
+                if let Err(err) = leds.show(&colours, brightness).await {
+                    error!("show error: {}", err);
+                } else {
+                    tx.send(Message::new_event(LEDColours(
+                        colours.iter().map(|c| (c.0, c.1, c.2)).collect(),
+                    )))
+                    .unwrap();
+                }
+            }
+            Command(SetBrightness(new_brightness)) => {
+                brightness = *new_brightness;
+                tx.send(Message::new_command(UpdateLEDs)).unwrap();
+                tx.send(Message::new_event(LEDBrightness(*new_brightness)))
+                    .unwrap();
+            }
+            _ => {}
+        }
+    }
+}
 
 pub enum Brightness {
     Dim,
@@ -207,26 +289,51 @@ impl ColourRange {
     }
 }
 
-pub trait LEDs {
-    /// Have a party!
-    ///
-    /// Play a short flashing sequence on the LEDs
-    fn party(&mut self) -> Result<(), String> {
-        let colours = [Colour::red(), Colour::green(), Colour::blue()];
-        let mut current_colours = [Colour::black(); NUM_PIXELS as usize];
+type ResponseSender = tokio::sync::oneshot::Sender<Result<(), String>>;
+type Request = (LEDCommand, ResponseSender);
+type RequestSender = std::sync::mpsc::SyncSender<Request>;
+type RequestReceiver = std::sync::mpsc::Receiver<Request>;
 
-        for colour in colours.iter() {
-            for i in 0..NUM_PIXELS {
-                current_colours[i as usize] = *colour;
-                self.show(&current_colours, Brightness::Bright.value())?;
-                thread::sleep(time::Duration::from_millis(50));
-            }
-        }
-        Ok(())
+enum LEDCommand {
+    Show([Colour; NUM_PIXELS], f32),
+}
+
+struct BlinktBackgroundLEDs {
+    sender: RequestSender,
+}
+
+impl BlinktBackgroundLEDs {
+    pub fn new() -> Self {
+        // TODO: check if this should be 0
+        let (req_sender, req_receiver) = sync_channel(0);
+
+        thread::spawn(move || {
+            run_worker(req_receiver);
+        });
+
+        BlinktBackgroundLEDs { sender: req_sender }
     }
 
-    /// Update the LEDs.
-    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String>;
+    async fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
+        let (resp_sender, resp_receiver) = tokio::sync::oneshot::channel();
+        let colours: [Colour; 8] = colours.try_into().expect("Invalid colour slice size");
+        self.sender
+            .try_send((LEDCommand::Show(colours, brightness), resp_sender))
+            .expect("Could not request LED update");
+        resp_receiver.await.unwrap()
+    }
+}
+
+fn run_worker(requests: RequestReceiver) {
+    let mut leds = BlinktLEDs::new();
+
+    for (command, sender) in requests.iter() {
+        match command {
+            LEDCommand::Show(colours, brightness) => {
+                sender.send(leds.show(&colours, brightness)).unwrap();
+            }
+        }
+    }
 }
 
 pub struct BlinktLEDs {
@@ -260,6 +367,26 @@ impl BlinktLEDs {
 
         result
     }
+
+    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
+        if self.should_update(colours, brightness) {
+            let mut colours_array: [Colour; NUM_PIXELS] = Default::default();
+            colours_array.copy_from_slice(colours);
+            let brightnesses = get_blinkt_brightness(&colours_array, brightness);
+            let details = colours.iter().enumerate().zip(brightnesses.iter());
+
+            for ((pixel, colour), &brightness) in details {
+                self.blinkt
+                    .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
+            }
+
+            if let Err(err) = self.blinkt.show() {
+                return Err(format!("Failed to write LEDs: {:?}", err));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn get_pivot(colours: &[Colour; NUM_PIXELS]) -> usize {
@@ -270,6 +397,7 @@ fn get_pivot(colours: &[Colour; NUM_PIXELS]) -> usize {
     }
     0
 }
+
 /// calculate brightness to send to Blinkt
 ///
 /// The Blinkt will switch a LED off with a brightness of less than 0.04.
@@ -334,28 +462,6 @@ pub(self) fn get_blinkt_brightness(
 impl Default for BlinktLEDs {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl LEDs for BlinktLEDs {
-    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
-        if self.should_update(colours, brightness) {
-            let mut colours_array: [Colour; NUM_PIXELS] = Default::default();
-            colours_array.copy_from_slice(colours);
-            let brightnesses = get_blinkt_brightness(&colours_array, brightness);
-            let details = colours.iter().enumerate().zip(brightnesses.iter());
-
-            for ((pixel, colour), &brightness) in details {
-                self.blinkt
-                    .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
-            }
-
-            if let Err(err) = self.blinkt.show() {
-                return Err(format!("Failed to write LEDs: {:?}", err));
-            }
-        }
-
-        Ok(())
     }
 }
 

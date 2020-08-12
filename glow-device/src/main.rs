@@ -1,55 +1,28 @@
-extern crate env_logger;
-extern crate glow_device;
-extern crate rppal;
-#[macro_use]
-extern crate log;
-
 use std::env;
 
-use glow_device::{
-    events::{run_loop, MessageHandler},
-    leds::{
-        BlinktLEDs, ColourRange, COLOUR_BLUE, COLOUR_CORAL, COLOUR_ORANGE, COLOUR_RED,
-        COLOUR_SALMON,
-    },
-    tplink::TPLinkHandler,
-    EnvironmentSensor, LEDHandler, VibrationSensor, WebEventHandler,
-};
+use log::info;
 
-fn main() -> Result<(), String> {
+use glow_device::events::Runner;
+
+#[tokio::main]
+async fn main() {
     env_logger::init();
 
-    let colour_range = ColourRange::new(
-        14.0,
-        4.0,
-        &[
-            COLOUR_BLUE,
-            COLOUR_ORANGE,
-            COLOUR_SALMON,
-            COLOUR_CORAL,
-            COLOUR_RED,
-        ],
-    )?;
-    let leds = BlinktLEDs::new();
-    let led_handler = LEDHandler::new(leds, colour_range);
-
-    let mut handlers: Vec<Box<dyn MessageHandler>> = vec![
-        Box::new(EnvironmentSensor {}),
-        Box::new(VibrationSensor {}),
-        Box::new(led_handler),
-        Box::new(TPLinkHandler {}),
-    ];
+    let mut runner = Runner::default();
+    runner.add(glow_device::tplink::handler);
+    runner.add(glow_device::leds::handler);
+    runner.add(glow_device::am2320::handler);
+    runner.add(glow_device::vibration::handler);
 
     if let (Ok(web_event_url), Ok(web_event_token)) =
         (env::var("WEB_EVENT_URL"), env::var("WEB_EVENT_TOKEN"))
     {
         info!("Adding web event handler");
-        handlers.push(Box::new(WebEventHandler::new(
+        runner.add(glow_device::web::WebHandler::new(
             web_event_url,
             web_event_token,
-        )));
+        ));
     }
 
-    run_loop(handlers);
-    Ok(())
+    runner.run().await;
 }

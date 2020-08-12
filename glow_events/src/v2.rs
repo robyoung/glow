@@ -20,11 +20,11 @@ impl Message {
         Self { stamp, payload }
     }
 
-    pub fn command(command: Command) -> Self {
+    pub fn new_command(command: Command) -> Self {
         Self::new(Payload::Command(command))
     }
 
-    pub fn event(event: Event) -> Self {
+    pub fn new_event(event: Event) -> Self {
         Self::new(Payload::Event(event))
     }
 
@@ -34,6 +34,22 @@ impl Message {
 
     pub fn payload(&self) -> &Payload {
         &self.payload
+    }
+
+    pub fn into_command(self) -> Option<Command> {
+        if let Payload::Command(command) = self.payload {
+            Some(command)
+        } else {
+            None
+        }
+    }
+
+    pub fn into_event(self) -> Option<Event> {
+        if let Payload::Event(event) = self.payload {
+            Some(event)
+        } else {
+            None
+        }
     }
 }
 
@@ -125,7 +141,7 @@ mod tests {
     #[test]
     fn new_event_has_recent_timestamp() {
         // act
-        let message = Message::event(Event::SingleTap);
+        let message = Message::new_event(Event::SingleTap);
 
         // assert
         let diff = Utc::now() - message.stamp();
@@ -135,7 +151,7 @@ mod tests {
     #[test]
     fn new_environment_event() {
         // act
-        let message = Message::event(Event::Measurement(Measurement::new(12.12, 13.13)));
+        let message = Message::new_event(Event::Measurement(Measurement::new(12.12, 13.13)));
 
         // assert
         assert_eq!(
@@ -174,7 +190,7 @@ mod tests {
     #[test]
     fn serialize_deserialize_an_event() {
         // arrange
-        let message = Message::event(Event::Measurement(Measurement::new(12.12, 13.13)));
+        let message = Message::new_event(Event::Measurement(Measurement::new(12.12, 13.13)));
 
         // act
         let serialized = serde_json::to_string(&message).unwrap();
