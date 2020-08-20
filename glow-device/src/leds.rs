@@ -92,6 +92,7 @@ pub async fn handler(tx: Sender) {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Brightness {
     Dim,
     Bright,
@@ -105,13 +106,16 @@ impl Default for Brightness {
 }
 
 impl Brightness {
+    /// Find the next brightness level from a given brightness
+    ///
+    /// Should go Off -> Dim -> Bright
     pub(crate) fn next_from(brightness: f32) -> Self {
         if brightness < Brightness::Dim.value() {
-            Brightness::Bright
-        } else if brightness < Brightness::Bright.value() {
-            Brightness::Off
-        } else {
             Brightness::Dim
+        } else if brightness < Brightness::Bright.value() {
+            Brightness::Bright
+        } else {
+            Brightness::Off
         }
     }
 
@@ -469,91 +473,107 @@ impl Default for BlinktLEDs {
 mod tests {
     use super::*;
 
-    #[test]
-    fn cannot_create_colour_range_with_no_buckets() {
-        // arrange
-        let colour_range = ColourRange::new(0.0, 0.0, &[]);
+    mod colour_range {
+        use super::*;
 
-        // assert
-        assert!(colour_range.is_err());
+        #[test]
+        fn cannot_create_colour_range_with_no_buckets() {
+            // arrange
+            let colour_range = ColourRange::new(0.0, 0.0, &[]);
+
+            // assert
+            assert!(colour_range.is_err());
+        }
+
+        fn get_colour_range() -> ColourRange {
+            ColourRange::new(
+                14.0,
+                4.0,
+                &[
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_SALMON,
+                    COLOUR_CORAL,
+                    COLOUR_RED,
+                ],
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn get_pixels_returns_all_pixels_as_colour_when_only_one_bucket() {
+            // arrange
+            let colour_range = ColourRange::new(14.0, 4.0, &[COLOUR_BLUE]).unwrap();
+
+            // assert
+            assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
+            assert!(colour_range.get_pixels(14.0) == vec![COLOUR_BLUE; 8]);
+            assert!(colour_range.get_pixels(18.0) == vec![COLOUR_BLUE; 8]);
+        }
+
+        #[test]
+        fn get_pixels_with_multiple_colour_ranges_lower_bound() {
+            // arrange
+            let colour_range = get_colour_range();
+
+            // assert
+            assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
+        }
+
+        #[test]
+        fn get_pixels_with_multiple_colour_ranges_upper_bound() {
+            // arrange
+            let colour_range = get_colour_range();
+
+            // assert
+            assert!(colour_range.get_pixels(31.0) == vec![COLOUR_RED; 8]);
+        }
+
+        #[test]
+        fn get_pixels_with_multiple_colour_ranges_split_pixels() {
+            // arrange
+            let colour_range = get_colour_range();
+
+            // assert
+            assert_eq!(
+                colour_range.get_pixels(16.0),
+                vec![
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE
+                ]
+            );
+            assert_eq!(
+                colour_range.get_pixels(17.0),
+                vec![
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                ]
+            );
+        }
     }
 
-    fn get_colour_range() -> ColourRange {
-        ColourRange::new(
-            14.0,
-            4.0,
-            &[
-                COLOUR_BLUE,
-                COLOUR_ORANGE,
-                COLOUR_SALMON,
-                COLOUR_CORAL,
-                COLOUR_RED,
-            ],
-        )
-        .unwrap()
-    }
-
     #[test]
-    fn get_pixels_returns_all_pixels_as_colour_when_only_one_bucket() {
-        // arrange
-        let colour_range = ColourRange::new(14.0, 4.0, &[COLOUR_BLUE]).unwrap();
+    fn colour_bucket_ordering() {
+        let bucket1 = ColourBucket::new("first", 1.1, COLOUR_BLUE);
+        let bucket2 = ColourBucket::new("second", 2.2, COLOUR_ORANGE);
+        let bucket3 = ColourBucket::new("third", 1.1, COLOUR_RED);
 
-        // assert
-        assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
-        assert!(colour_range.get_pixels(14.0) == vec![COLOUR_BLUE; 8]);
-        assert!(colour_range.get_pixels(18.0) == vec![COLOUR_BLUE; 8]);
-    }
-
-    #[test]
-    fn get_pixels_with_multiple_colour_ranges_lower_bound() {
-        // arrange
-        let colour_range = get_colour_range();
-
-        // assert
-        assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
-    }
-
-    #[test]
-    fn get_pixels_with_multiple_colour_ranges_upper_bound() {
-        // arrange
-        let colour_range = get_colour_range();
-
-        // assert
-        assert!(colour_range.get_pixels(31.0) == vec![COLOUR_RED; 8]);
-    }
-
-    #[test]
-    fn get_pixels_with_multiple_colour_ranges_split_pixels() {
-        // arrange
-        let colour_range = get_colour_range();
-
-        // assert
-        assert_eq!(
-            colour_range.get_pixels(16.0),
-            vec![
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE
-            ]
-        );
-        assert_eq!(
-            colour_range.get_pixels(17.0),
-            vec![
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-            ]
-        );
+        assert!(bucket1 < bucket2);
+        assert!(bucket2 > bucket3);
+        assert_eq!(bucket1.cmp(&bucket3), Ordering::Equal);
+        assert!(bucket1 != bucket3);
     }
 
     #[test]
@@ -699,4 +719,15 @@ mod tests {
             [0.04; 8]
         );
     }
+
+    #[test]
+    fn brightness_next_from() {
+        assert_eq!(Brightness::next_from(0.0), Brightness::Dim);
+        assert_eq!(Brightness::next_from(0.009), Brightness::Dim);
+        assert_eq!(Brightness::next_from(0.01), Brightness::Bright);
+        assert_eq!(Brightness::next_from(0.49), Brightness::Bright);
+        assert_eq!(Brightness::next_from(0.5), Brightness::Off);
+        assert_eq!(Brightness::next_from(0.9), Brightness::Off);
+    }
+
 }
