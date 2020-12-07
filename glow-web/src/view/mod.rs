@@ -34,13 +34,12 @@ impl actix_web::FromRequest for TeraView {
         req: &actix_web::HttpRequest,
         _payload: &mut actix_web::dev::Payload,
     ) -> Self::Future {
-        if let Some(tmpl) = req.app_data::<actix_web::web::Data<tera::Tera>>() {
-            ok(TeraView::new(tmpl.clone().into_inner()))
-        } else {
+        req.app_data::<actix_web::web::Data<tera::Tera>>().map_or(
             err(actix_web::error::ErrorInternalServerError(
                 "Could not build template view",
-            ))
-        }
+            )),
+            |tmpl| ok(TeraView::new(tmpl.clone().into_inner())),
+        )
     }
 }
 

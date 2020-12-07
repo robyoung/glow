@@ -1,6 +1,11 @@
-use std::{cmp::Ordering, f32, fmt, thread, time};
+use std::{cmp::Ordering, convert::TryInto, f32, fmt, sync::mpsc::sync_channel, thread};
 
 use blinkt::Blinkt;
+use glow_events::v2::Message;
+use log::{debug, error};
+use tokio::time::{delay_for, Duration};
+
+use crate::events::Sender;
 
 const NUM_PIXELS: usize = 8;
 
@@ -10,6 +15,84 @@ pub const COLOUR_SALMON: Colour = Colour(160, 10, 1);
 pub const COLOUR_CORAL: Colour = Colour(255, 1, 1);
 pub const COLOUR_RED: Colour = Colour(255, 0, 100);
 
+pub async fn handler(tx: Sender) {
+    let colour_range = ColourRange::new(
+        14.0,
+        4.0,
+        &[
+            COLOUR_BLUE,
+            COLOUR_ORANGE,
+            COLOUR_SALMON,
+            COLOUR_CORAL,
+            COLOUR_RED,
+        ],
+    )
+    .unwrap();
+    let mut colours = colour_range.all(Colour::black());
+    let mut brightness = Brightness::default().value();
+    let mut leds = BlinktBackgroundLEDs::new();
+    let mut rx = tx.subscribe();
+
+    use glow_events::v2::{Command::*, Event::*, Payload::*};
+    while let Ok(message) = rx.recv().await {
+        match message.payload() {
+            Event(Measurement(measurement)) => {
+                let new_colours = colour_range.get_pixels(measurement.temperature as f32);
+                if new_colours.iter().zip(&colours).any(|(&a, &b)| a != b) {
+                    colours = new_colours;
+                    tx.send(Message::new_command(UpdateLEDs))
+                        .expect("Failed to write TPLink device list to channel");
+                } else {
+                    debug!("Not updating unchanged LEDs");
+                }
+            }
+            Event(SingleTap) => {
+                brightness = Brightness::next_from(brightness).value();
+                tx.send(Message::new_command(RunParty)).unwrap();
+                tx.send(Message::new_command(UpdateLEDs)).unwrap();
+            }
+            Command(RunParty) => {
+                // Have a party!
+                //
+                // Play a short flashing sequence on the LEDs
+                // TODO: move this to a function?
+                let colours = [Colour::red(), Colour::green(), Colour::blue()];
+                let mut current_colours = [Colour::black(); NUM_PIXELS as usize];
+
+                for colour in colours.iter() {
+                    for i in 0..NUM_PIXELS {
+                        current_colours[i as usize] = *colour;
+                        leds.show(&current_colours, Brightness::Bright.value())
+                            .await
+                            .unwrap_or_else(|err| {
+                                error!("party error: {}", err);
+                            });
+                        delay_for(Duration::from_millis(50)).await;
+                    }
+                }
+            }
+            Command(UpdateLEDs) => {
+                if let Err(err) = leds.show(&colours, brightness).await {
+                    error!("show error: {}", err);
+                } else {
+                    tx.send(Message::new_event(LEDColours(
+                        colours.iter().map(|c| (c.0, c.1, c.2)).collect(),
+                    )))
+                    .unwrap();
+                }
+            }
+            Command(SetBrightness(new_brightness)) => {
+                brightness = *new_brightness;
+                tx.send(Message::new_command(UpdateLEDs)).unwrap();
+                tx.send(Message::new_event(LEDBrightness(*new_brightness)))
+                    .unwrap();
+            }
+            _ => {}
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub enum Brightness {
     Dim,
     Bright,
@@ -23,13 +106,16 @@ impl Default for Brightness {
 }
 
 impl Brightness {
+    /// Find the next brightness level from a given brightness
+    ///
+    /// Should go Off -> Dim -> Bright
     pub(crate) fn next_from(brightness: f32) -> Self {
         if brightness < Brightness::Dim.value() {
-            Brightness::Bright
-        } else if brightness < Brightness::Bright.value() {
-            Brightness::Off
-        } else {
             Brightness::Dim
+        } else if brightness < Brightness::Bright.value() {
+            Brightness::Bright
+        } else {
+            Brightness::Off
         }
     }
 
@@ -207,26 +293,51 @@ impl ColourRange {
     }
 }
 
-pub trait LEDs {
-    /// Have a party!
-    ///
-    /// Play a short flashing sequence on the LEDs
-    fn party(&mut self) -> Result<(), String> {
-        let colours = [Colour::red(), Colour::green(), Colour::blue()];
-        let mut current_colours = [Colour::black(); NUM_PIXELS as usize];
+type ResponseSender = tokio::sync::oneshot::Sender<Result<(), String>>;
+type Request = (LEDCommand, ResponseSender);
+type RequestSender = std::sync::mpsc::SyncSender<Request>;
+type RequestReceiver = std::sync::mpsc::Receiver<Request>;
 
-        for colour in colours.iter() {
-            for i in 0..NUM_PIXELS {
-                current_colours[i as usize] = *colour;
-                self.show(&current_colours, Brightness::Bright.value())?;
-                thread::sleep(time::Duration::from_millis(50));
-            }
-        }
-        Ok(())
+enum LEDCommand {
+    Show([Colour; NUM_PIXELS], f32),
+}
+
+struct BlinktBackgroundLEDs {
+    sender: RequestSender,
+}
+
+impl BlinktBackgroundLEDs {
+    pub fn new() -> Self {
+        // TODO: check if this should be 0
+        let (req_sender, req_receiver) = sync_channel(0);
+
+        thread::spawn(move || {
+            run_worker(req_receiver);
+        });
+
+        BlinktBackgroundLEDs { sender: req_sender }
     }
 
-    /// Update the LEDs.
-    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String>;
+    async fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
+        let (resp_sender, resp_receiver) = tokio::sync::oneshot::channel();
+        let colours: [Colour; 8] = colours.try_into().expect("Invalid colour slice size");
+        self.sender
+            .try_send((LEDCommand::Show(colours, brightness), resp_sender))
+            .expect("Could not request LED update");
+        resp_receiver.await.unwrap()
+    }
+}
+
+fn run_worker(requests: RequestReceiver) {
+    let mut leds = BlinktLEDs::new();
+
+    for (command, sender) in requests.iter() {
+        match command {
+            LEDCommand::Show(colours, brightness) => {
+                sender.send(leds.show(&colours, brightness)).unwrap();
+            }
+        }
+    }
 }
 
 pub struct BlinktLEDs {
@@ -260,6 +371,26 @@ impl BlinktLEDs {
 
         result
     }
+
+    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
+        if self.should_update(colours, brightness) {
+            let mut colours_array: [Colour; NUM_PIXELS] = Default::default();
+            colours_array.copy_from_slice(colours);
+            let brightnesses = get_blinkt_brightness(&colours_array, brightness);
+            let details = colours.iter().enumerate().zip(brightnesses.iter());
+
+            for ((pixel, colour), &brightness) in details {
+                self.blinkt
+                    .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
+            }
+
+            if let Err(err) = self.blinkt.show() {
+                return Err(format!("Failed to write LEDs: {:?}", err));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 fn get_pivot(colours: &[Colour; NUM_PIXELS]) -> usize {
@@ -270,6 +401,7 @@ fn get_pivot(colours: &[Colour; NUM_PIXELS]) -> usize {
     }
     0
 }
+
 /// calculate brightness to send to Blinkt
 ///
 /// The Blinkt will switch a LED off with a brightness of less than 0.04.
@@ -337,117 +469,111 @@ impl Default for BlinktLEDs {
     }
 }
 
-impl LEDs for BlinktLEDs {
-    fn show(&mut self, colours: &[Colour], brightness: f32) -> Result<(), String> {
-        if self.should_update(colours, brightness) {
-            let mut colours_array: [Colour; NUM_PIXELS] = Default::default();
-            colours_array.copy_from_slice(colours);
-            let brightnesses = get_blinkt_brightness(&colours_array, brightness);
-            let details = colours.iter().enumerate().zip(brightnesses.iter());
-
-            for ((pixel, colour), &brightness) in details {
-                self.blinkt
-                    .set_pixel_rgbb(pixel, colour.0, colour.1, colour.2, brightness);
-            }
-
-            if let Err(err) = self.blinkt.show() {
-                return Err(format!("Failed to write LEDs: {:?}", err));
-            }
-        }
-
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn cannot_create_colour_range_with_no_buckets() {
-        // arrange
-        let colour_range = ColourRange::new(0.0, 0.0, &[]);
+    mod colour_range {
+        use super::*;
 
-        // assert
-        assert!(colour_range.is_err());
+        #[test]
+        fn cannot_create_colour_range_with_no_buckets() {
+            // arrange
+            let colour_range = ColourRange::new(0.0, 0.0, &[]);
+
+            // assert
+            assert!(colour_range.is_err());
+        }
+
+        fn get_colour_range() -> ColourRange {
+            ColourRange::new(
+                14.0,
+                4.0,
+                &[
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_SALMON,
+                    COLOUR_CORAL,
+                    COLOUR_RED,
+                ],
+            )
+            .unwrap()
+        }
+
+        #[test]
+        fn get_pixels_returns_all_pixels_as_colour_when_only_one_bucket() {
+            // arrange
+            let colour_range = ColourRange::new(14.0, 4.0, &[COLOUR_BLUE]).unwrap();
+
+            // assert
+            assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
+            assert!(colour_range.get_pixels(14.0) == vec![COLOUR_BLUE; 8]);
+            assert!(colour_range.get_pixels(18.0) == vec![COLOUR_BLUE; 8]);
+        }
+
+        #[test]
+        fn get_pixels_with_multiple_colour_ranges_lower_bound() {
+            // arrange
+            let colour_range = get_colour_range();
+
+            // assert
+            assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
+        }
+
+        #[test]
+        fn get_pixels_with_multiple_colour_ranges_upper_bound() {
+            // arrange
+            let colour_range = get_colour_range();
+
+            // assert
+            assert!(colour_range.get_pixels(31.0) == vec![COLOUR_RED; 8]);
+        }
+
+        #[test]
+        fn get_pixels_with_multiple_colour_ranges_split_pixels() {
+            // arrange
+            let colour_range = get_colour_range();
+
+            // assert
+            assert_eq!(
+                colour_range.get_pixels(16.0),
+                vec![
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE
+                ]
+            );
+            assert_eq!(
+                colour_range.get_pixels(17.0),
+                vec![
+                    COLOUR_BLUE,
+                    COLOUR_BLUE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                    COLOUR_ORANGE,
+                ]
+            );
+        }
     }
 
-    fn get_colour_range() -> ColourRange {
-        ColourRange::new(
-            14.0,
-            4.0,
-            &[
-                COLOUR_BLUE,
-                COLOUR_ORANGE,
-                COLOUR_SALMON,
-                COLOUR_CORAL,
-                COLOUR_RED,
-            ],
-        )
-        .unwrap()
-    }
-
     #[test]
-    fn get_pixels_returns_all_pixels_as_colour_when_only_one_bucket() {
-        // arrange
-        let colour_range = ColourRange::new(14.0, 4.0, &[COLOUR_BLUE]).unwrap();
+    fn colour_bucket_ordering() {
+        let bucket1 = ColourBucket::new("first", 1.1, COLOUR_BLUE);
+        let bucket2 = ColourBucket::new("second", 2.2, COLOUR_ORANGE);
+        let bucket3 = ColourBucket::new("third", 1.1, COLOUR_RED);
 
-        // assert
-        assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
-        assert!(colour_range.get_pixels(14.0) == vec![COLOUR_BLUE; 8]);
-        assert!(colour_range.get_pixels(18.0) == vec![COLOUR_BLUE; 8]);
-    }
-
-    #[test]
-    fn get_pixels_with_multiple_colour_ranges_lower_bound() {
-        // arrange
-        let colour_range = get_colour_range();
-
-        // assert
-        assert!(colour_range.get_pixels(12.0) == vec![COLOUR_BLUE; 8]);
-    }
-
-    #[test]
-    fn get_pixels_with_multiple_colour_ranges_upper_bound() {
-        // arrange
-        let colour_range = get_colour_range();
-
-        // assert
-        assert!(colour_range.get_pixels(31.0) == vec![COLOUR_RED; 8]);
-    }
-
-    #[test]
-    fn get_pixels_with_multiple_colour_ranges_split_pixels() {
-        // arrange
-        let colour_range = get_colour_range();
-
-        // assert
-        assert_eq!(
-            colour_range.get_pixels(16.0),
-            vec![
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE
-            ]
-        );
-        assert_eq!(
-            colour_range.get_pixels(17.0),
-            vec![
-                COLOUR_BLUE,
-                COLOUR_BLUE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-                COLOUR_ORANGE,
-            ]
-        );
+        assert!(bucket1 < bucket2);
+        assert!(bucket2 > bucket3);
+        assert_eq!(bucket1.cmp(&bucket3), Ordering::Equal);
+        assert!(bucket1 != bucket3);
     }
 
     #[test]
@@ -592,5 +718,15 @@ mod tests {
             ),
             [0.04; 8]
         );
+    }
+
+    #[test]
+    fn brightness_next_from() {
+        assert_eq!(Brightness::next_from(0.0), Brightness::Dim);
+        assert_eq!(Brightness::next_from(0.009), Brightness::Dim);
+        assert_eq!(Brightness::next_from(0.01), Brightness::Bright);
+        assert_eq!(Brightness::next_from(0.49), Brightness::Bright);
+        assert_eq!(Brightness::next_from(0.5), Brightness::Off);
+        assert_eq!(Brightness::next_from(0.9), Brightness::Off);
     }
 }

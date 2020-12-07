@@ -179,16 +179,14 @@ impl FromRequest for SQLiteStore {
         req: &actix_web::HttpRequest,
         _payload: &mut actix_web::dev::Payload,
     ) -> Self::Future {
-        if let Some(store) = req
-            .app_data::<actix_web::web::Data<SQLiteStorePool>>()
+        req.app_data::<actix_web::web::Data<SQLiteStorePool>>()
             .and_then(|pool: &actix_web::web::Data<SQLiteStorePool>| pool.get().ok())
-        {
-            ok(store)
-        } else {
-            err(actix_web::error::ErrorInternalServerError(
-                "Could not retrieve SQLite store.",
-            ))
-        }
+            .map_or(
+                err(actix_web::error::ErrorInternalServerError(
+                    "Could not retrieve SQLite store.",
+                )),
+                ok,
+            )
     }
 }
 
@@ -345,7 +343,7 @@ impl Store for SQLiteStore {
     }
 
     fn queue_command(&self, command: Command) -> Result<()> {
-        insert_message_to(&"commands", &self.conn, &Message::command(command)).map(|_| ())
+        insert_message_to(&"commands", &self.conn, &Message::new_command(command)).map(|_| ())
     }
 
     fn dequeue_commands(&self) -> Result<Vec<Message>> {

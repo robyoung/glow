@@ -46,12 +46,10 @@ impl Session for ActixSession {
     }
 
     fn pop<T: DeserializeOwned>(&mut self, key: &str) -> Result<Option<T>> {
-        Ok(if let Some(value) = self.get(key)? {
+        Ok(self.get(key)?.map(|value| {
             self.remove(key);
-            Some(value)
-        } else {
-            None
-        })
+            value
+        }))
     }
 
     fn remove(&mut self, key: &str) {
