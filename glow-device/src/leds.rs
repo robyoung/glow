@@ -729,5 +729,4 @@ mod tests {
         assert_eq!(Brightness::next_from(0.5), Brightness::Off);
         assert_eq!(Brightness::next_from(0.9), Brightness::Off);
     }
-
 }
